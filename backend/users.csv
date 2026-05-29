@@ -1,0 +1,23 @@
+# 域名管家 - 用户导入模板
+# 使用方法：编辑此文件，填入用户信息，然后运行：
+# python manage_users.py import --file users.csv
+
+# CSV格式说明：
+# feishu_userid,name,role,email,phone,department
+# - feishu_userid: 飞书用户ID（必需，格式：ou_xxxxxxxxxxxxxxxx）
+# - name: 用户姓名（必需）
+# - role: 角色（必需）
+#   可选值：
+#   - business: 业务同事
+#   - domain_spec: 域名专员
+#   - admin: 系统管理员
+# - email: 邮箱（可选）
+# - phone: 手机号（可选）
+# - department: 部门（可选）
+
+# 示例数据：
+feishu_userid,name,role,email,phone,department
+ou_1234567890,张三,domain_spec,zhangsan@company.com,13800138000,研发部
+ou_0987654321,李四,admin,lisi@company.com,13800138001,IT部
+ou_5555555555,王五,business,wangwu@company.com,13800138002,市场部
+ou_6666666666,赵六,domain_spec,zhaoliu@company.com,13800138003,产品部
