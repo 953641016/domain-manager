@@ -2,7 +2,36 @@
 
 企业级域名管理系统，提供域名注册、DNS解析、到期提醒等功能，与飞书深度集成。
 
-## 功能特性
+## ✨ 已完成功能
+
+### 🔐 安全与认证
+- ✅ 飞书OAuth扫码登录
+- ✅ JWT令牌认证
+- ✅ 多角色权限控制（业务同事/域名专员/管理员/超级管理员）
+- ✅ 敏感数据加密存储
+- ✅ 完整的审计日志系统
+
+### 📋 核心功能
+- ✅ 域名管理 - 增删改查、状态跟踪
+- ✅ DNS解析管理 - A/AAAA/CNAME/MX/TXT/SRV/NS记录
+- ✅ 审批流程 - 提交、审批、拒绝、执行
+- ✅ 注册商集成 - Cloudflare、GoDaddy适配器
+- ✅ 定时任务 - 域名到期检查、状态同步
+
+### 🎨 用户界面
+- ✅ 登录页面（飞书扫码）
+- ✅ 仪表盘（统计概览）
+- ✅ 域名管理页面
+- ✅ 申请管理页面
+- ✅ 响应式布局设计
+
+### 🚀 部署
+- ✅ Docker容器化部署
+- ✅ Docker Compose编排
+- ✅ Ubuntu 22.04一键部署脚本
+- ✅ Nginx反向代理配置
+
+## 📋 功能特性
 
 - 📋 **域名管理** - 统一管理多平台域名
 - 🔄 **DNS解析** - 自动化DNS配置
@@ -44,43 +73,40 @@ domain-manager/
 
 ### 环境要求
 
-- Python 3.11+
-- Node.js 18+
-- Nginx 1.20+
+- Docker 20.10+
+- Docker Compose 2.0+
 
-### 部署
+### Docker部署（推荐）
 
-1. **克隆项目**
-   ```bash
-   git clone <repo-url>
-   cd domain-manager
-   ```
+**Ubuntu 22.04 LTS 一键部署：**
 
-2. **初始化部署**
-   ```bash
-   ./scripts/deploy.sh
-   ```
+```bash
+# 下载并运行部署脚本
+curl -fsSL https://raw.githubusercontent.com/953641016/domain-manager/main/scripts/ubuntu-deploy.sh | bash
+```
 
-3. **配置环境变量**
-   ```bash
-   cd backend
-   cp .env.example .env
-   # 编辑 .env 配置文件
-   ```
+**手动部署：**
 
-4. **配置Nginx**
-   ```bash
-   sudo cp nginx/domainmanager.conf /etc/nginx/conf.d/
-   sudo nginx -t && sudo nginx -s reload
-   ```
+```bash
+# 1. 克隆项目
+git clone https://github.com/953641016/domain-manager.git
+cd domain-manager
 
-5. **配置Systemd服务**
-   ```bash
-   sudo cp systemd/domainmanager.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable domainmanager
-   sudo systemctl start domainmanager
-   ```
+# 2. 配置环境变量
+cp backend/.env.example backend/.env
+nano backend/.env  # 编辑配置
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 访问应用
+# 前端: http://localhost
+# API: http://localhost/api
+```
+
+### 传统部署
+
+如果没有Docker环境，可参考 [传统部署指南](docs/deployment.md#方式二传统部署)
 
 ## 文档
 

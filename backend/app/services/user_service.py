@@ -6,7 +6,7 @@ from typing import List, Optional, Tuple, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.user import User
-from app.models.permission import ROLE_PERMISSIONS
+from app.models.permission import ROLE_PERMISSIONS, get_all_roles
 from app.schemas.user import UserCreate, UserUpdate
 
 
@@ -223,7 +223,4 @@ class UserService:
         """
         获取所有角色信息
         """
-        return [
-            UserService.get_role_info(role)
-            for role in ROLE_PERMISSIONS.keys()
-        ]
+        return get_all_roles()

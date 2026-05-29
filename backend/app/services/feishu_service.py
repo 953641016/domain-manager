@@ -1,10 +1,10 @@
 """
 飞书API服务模块
-提供飞书OAuth、用户信息获取等功能
+提供飞书OAuth、用户信息获取、机器人消息等功能
 """
 import requests
 import json
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from app.config import Config
 
@@ -15,6 +15,8 @@ class FeishuService:
     def __init__(self):
         self.app_id = Config.FEISHU_APP_ID
         self.app_secret = Config.FEISHU_APP_SECRET
+        self.verification_token = Config.FEISHU_VERIFICATION_TOKEN
+        self.encrypt_key = Config.FEISHU_ENCRYPT_KEY
         self.base_url = "https://open.feishu.cn"
         
         # 缓存token
@@ -147,6 +149,156 @@ class FeishuService:
             return []
         
         return data.get("data", {}).get("user_list", [])
+    
+    def send_text_message(
+        self, 
+        receive_id: str, 
+        content: str, 
+        receive_id_type: str = "open_id"
+    ) -> Dict[str, Any]:
+        """
+        发送文本消息
+        
+        Args:
+            receive_id: 接收者ID
+            content: 消息内容
+            receive_id_type: 接收者ID类型 (open_id/user_id/union_id/email/chat_id)
+        
+        Returns:
+            飞书API响应
+        """
+        url = f"{self.base_url}/open-apis/im/v1/messages"
+        headers = {
+            "Authorization": f"Bearer {self.get_app_access_token()}",
+            "Content-Type": "application/json"
+        }
+        params = {
+            "receive_id_type": receive_id_type
+        }
+        payload = {
+            "receive_id": receive_id,
+            "msg_type": "text",
+            "content": json.dumps({"text": content})
+        }
+        
+        response = requests.post(url, headers=headers, params=params, json=payload)
+        return response.json()
+    
+    def send_card_message(
+        self,
+        receive_id: str,
+        card_content: Dict[str, Any],
+        receive_id_type: str = "open_id"
+    ) -> Dict[str, Any]:
+        """
+        发送交互式卡片消息
+        
+        Args:
+            receive_id: 接收者ID
+            card_content: 卡片内容
+            receive_id_type: 接收者ID类型
+        
+        Returns:
+            飞书API响应
+        """
+        url = f"{self.base_url}/open-apis/im/v1/messages"
+        headers = {
+            "Authorization": f"Bearer {self.get_app_access_token()}",
+            "Content-Type": "application/json"
+        }
+        params = {
+            "receive_id_type": receive_id_type
+        }
+        payload = {
+            "receive_id": receive_id,
+            "msg_type": "interactive",
+            "content": json.dumps(card_content)
+        }
+        
+        response = requests.post(url, headers=headers, params=params, json=payload)
+        return response.json()
+    
+    def send_domain_alert_card(
+        self,
+        receive_id: str,
+        domain_name: str,
+        expire_days: int,
+        receive_id_type: str = "open_id"
+    ) -> Dict[str, Any]:
+        """
+        发送域名到期提醒卡片
+        
+        Args:
+            receive_id: 接收者ID
+            domain_name: 域名
+            expire_days: 剩余天数
+            receive_id_type: 接收者ID类型
+        
+        Returns:
+            飞书API响应
+        """
+        card_content = {
+            "config": {
+                "wide_screen_mode": True
+            },
+            "header": {
+                "title": {
+                    "tag": "plain_text",
+                    "content": "⚠️ 域名到期提醒"
+                },
+                "template": "orange"
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": f"**域名**: {domain_name}\n**剩余天数**: {expire_days} 天"
+                    }
+                },
+                {
+                    "tag": "hr"
+                },
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "plain_text",
+                        "content": "请及时处理域名续费！"
+                    }
+                }
+            ]
+        }
+        return self.send_card_message(receive_id, card_content, receive_id_type)
+    
+    def verify_webhook_signature(self, request_body: Dict[str, Any]) -> bool:
+        """
+        验证webhook请求签名
+        
+        Args:
+            request_body: 请求体
+        
+        Returns:
+            是否验证通过
+        """
+        if not self.verification_token:
+            return True
+        
+        token = request_body.get("token")
+        return token == self.verification_token
+    
+    def handle_url_verification(self, request_body: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        处理URL验证请求
+        
+        Args:
+            request_body: 请求体
+        
+        Returns:
+            验证响应
+        """
+        return {
+            "challenge": request_body.get("challenge")
+        }
 
 
 # 单例实例

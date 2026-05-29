@@ -1,12 +1,13 @@
 """
 飞书相关API路由
-提供OAuth授权、用户信息获取等接口
+提供OAuth授权、用户信息获取、webhook事件处理等接口
 """
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Dict, Any
 from app.config import Config
 from app.services.feishu_service import feishu_service
+from app.bots.feishu import feishu_bot
 
 
 router = APIRouter(
@@ -95,3 +96,114 @@ async def get_user_by_id(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取用户信息失败: {str(e)}")
+
+
+@router.post("/webhook")
+async def feishu_webhook(request: Request):
+    """
+    飞书事件回调处理接口
+    处理URL验证、消息接收等事件
+    """
+    try:
+        # 解析请求体
+        request_body = await request.json()
+        
+        # 验证签名
+        if not feishu_service.verify_webhook_signature(request_body):
+            raise HTTPException(status_code=403, detail="签名验证失败")
+        
+        # 处理URL验证请求
+        if request_body.get("type") == "url_verification":
+            return feishu_service.handle_url_verification(request_body)
+        
+        # 处理其他事件
+        event_type = request_body.get("header", {}).get("event_type")
+        
+        if event_type == "im.message.receive_v1":
+            # 处理消息接收事件
+            event = request_body.get("event", {})
+            
+            # 调用机器人处理消息
+            await feishu_bot.handle_message(event)
+            
+            return {
+                "success": True,
+                "message": "消息已接收"
+            }
+        
+        # 默认响应
+        return {
+            "success": True,
+            "message": "事件已接收"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"处理webhook失败: {str(e)}")
+
+
+class SendMessageRequest(BaseModel):
+    """发送消息请求模型"""
+    receive_id: str
+    content: str
+    receive_id_type: str = "open_id"
+
+
+@router.post("/send-message")
+async def send_message(request: SendMessageRequest):
+    """
+    发送飞书消息接口
+    """
+    try:
+        result = feishu_service.send_text_message(
+            receive_id=request.receive_id,
+            content=request.content,
+            receive_id_type=request.receive_id_type
+        )
+        
+        if result.get("code") != 0:
+            raise HTTPException(status_code=400, detail=f"发送消息失败: {result}")
+        
+        return {
+            "success": True,
+            "data": result
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"发送消息失败: {str(e)}")
+
+
+class SendCardRequest(BaseModel):
+    """发送卡片消息请求模型"""
+    receive_id: str
+    card_content: Dict[str, Any]
+    receive_id_type: str = "open_id"
+
+
+@router.post("/send-card")
+async def send_card(request: SendCardRequest):
+    """
+    发送飞书交互式卡片接口
+    """
+    try:
+        result = feishu_service.send_card_message(
+            receive_id=request.receive_id,
+            card_content=request.card_content,
+            receive_id_type=request.receive_id_type
+        )
+        
+        if result.get("code") != 0:
+            raise HTTPException(status_code=400, detail=f"发送卡片失败: {result}")
+        
+        return {
+            "success": True,
+            "data": result
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"发送卡片失败: {str(e)}")

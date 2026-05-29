@@ -1,6 +1,8 @@
 """
 角色权限定义
 """
+from typing import List, Dict, Any
+from app.config import Config
 
 ROLE_PERMISSIONS = {
     "business": {
@@ -71,12 +73,12 @@ ROLE_PERMISSIONS = {
 
 # 需要超级管理员确认的关键操作类型
 CRITICAL_OPERATIONS = {
-    "add_domain_spec", "update_domain_spec", "update_user_role", 
+    "add_domain_spec", "update_domain_spec", "update_user_role",
     "add_admin", "remove_admin", "config_accounts"
 }
 
-# 超级管理员固定飞书ID（或可配置）
-SUPER_ADMIN_FEISHU_USERID = "ou_super_admin"
+# 超级管理员飞书ID（从配置读取）
+SUPER_ADMIN_FEISHU_USERID = Config.SUPER_ADMIN_FEISHU_USER_ID
 
 # 关键角色变更需要确认的映射
 ROLE_CONFIRMATION_REQUIRED = {
@@ -92,9 +94,11 @@ NEEDS_SUPER_ADMIN_CONFIRM = {
     ("admin", "business"), ("admin", "domain_spec"),
 }
 
+
 def needs_confirmation(old_role: str, new_role: str) -> bool:
     """判断角色变更是否需要确认"""
     return (old_role, new_role) in NEEDS_SUPER_ADMIN_CONFIRM
+
 
 def needs_super_admin_confirmation(old_role: str, new_role: str) -> bool:
     """判断角色变更是否需要超级管理员确认"""
@@ -103,3 +107,18 @@ def needs_super_admin_confirmation(old_role: str, new_role: str) -> bool:
     if old_role in ["super_admin"]:
         return True
     return (old_role, new_role) in NEEDS_SUPER_ADMIN_CONFIRM
+
+
+def get_all_roles() -> List[Dict[str, Any]]:
+    """获取所有角色信息列表"""
+    return [
+        {
+            "code": role,
+            "name": info["name"],
+            "description": info["description"],
+            "role_level": info["role_level"],
+            "web_access": info.get("web_access", False),
+            "permissions": [k for k, v in info.items() if isinstance(v, bool) and k.startswith("can_")]
+        }
+        for role, info in ROLE_PERMISSIONS.items()
+    ]

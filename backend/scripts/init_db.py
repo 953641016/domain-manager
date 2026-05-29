@@ -12,7 +12,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.core.database import engine, Base, SessionLocal
 from app.models.user import User
-from app.models.permission import ROLE_PERMISSIONS, SUPER_ADMIN_FEISHU_USERID
+from app.models.permission import ROLE_PERMISSIONS
+from app.config import Config
 from app.models.user_confirmation import UserOperationConfirmation
 
 
@@ -38,6 +39,12 @@ def init_db():
 
         if existing_super_admin:
             print("\n2. 超级管理员用户已存在，跳过创建")
+            print(f"   - 现有飞书ID: {existing_super_admin.feishu_user_id}")
+            # 如果配置了新的超级管理员ID，更新它
+            if Config.SUPER_ADMIN_FEISHU_USER_ID and existing_super_admin.feishu_user_id != Config.SUPER_ADMIN_FEISHU_USER_ID:
+                existing_super_admin.feishu_user_id = Config.SUPER_ADMIN_FEISHU_USER_ID
+                db.commit()
+                print(f"   ✓ 已更新超级管理员飞书ID为: {Config.SUPER_ADMIN_FEISHU_USER_ID}")
         else:
             print("\n2. 创建默认超级管理员用户...")
             
@@ -50,10 +57,10 @@ def init_db():
                 name="超级管理员",
                 email="super_admin@company.com",
                 role="super_admin",
-                feishu_userid=SUPER_ADMIN_FEISHU_USERID,
+                feishu_user_id=Config.SUPER_ADMIN_FEISHU_USER_ID or None,
                 permissions=permission_list,
                 is_active=True,
-                remark="默认超级管理员账户，请更新飞书用户ID"
+                remark="默认超级管理员账户"
             )
             db.add(super_admin)
             db.commit()
@@ -61,9 +68,8 @@ def init_db():
             print(f"   ✓ 超级管理员用户创建成功")
             print(f"   - ID: {super_admin.id}")
             print(f"   - 姓名: {super_admin.name}")
-            print(f"   - 飞书ID: {super_admin.feishu_userid}")
+            print(f"   - 飞书ID: {super_admin.feishu_user_id}")
             print(f"   - 角色: {super_admin.role}")
-            print(f"   - 重要: 请将 SUPER_ADMIN_FEISHU_USERID 设置为实际飞书用户 ID")
 
         # 检查是否已有系统管理员
         existing_admin = db.query(User).filter(User.role == "admin").first()
@@ -80,7 +86,7 @@ def init_db():
                 name="系统管理员",
                 email="admin@company.com",
                 role="admin",
-                feishu_userid="ou_admin",
+                feishu_user_id=Config.ADMIN_USER_IDS[0] if Config.ADMIN_USER_IDS else None,
                 permissions=permission_list,
                 is_active=True,
                 remark="默认系统管理员账户"
@@ -91,7 +97,7 @@ def init_db():
             print(f"   ✓ 系统管理员用户创建成功")
             print(f"   - ID: {admin.id}")
             print(f"   - 姓名: {admin.name}")
-            print(f"   - 飞书ID: {admin.feishu_userid}")
+            print(f"   - 飞书ID: {admin.feishu_user_id}")
             print(f"   - 角色: {admin.role}")
         else:
             print("\n3. 系统管理员用户已存在")

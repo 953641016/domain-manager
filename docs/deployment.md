@@ -1,8 +1,397 @@
 # 域名管家 - 部署文档
 
-## 一、技术栈
+## 前置准备：域名解析
 
-### 1.1 完整技术栈
+部署域名管家系统需要配置以下域名解析：
+
+| 域名用途 | 域名示例 | 是否必需 | 说明 |
+|---------|---------|---------|------|
+| **主域名** | `d.fwxg.com` | ✅ 必需 | 用于Web管理后台和API访问 |
+
+**DNS解析配置示例：**
+
+```
+# A记录（IPv4）
+d.fwxg.com  A  192.168.1.100
+
+# AAAA记录（IPv6，可选）
+d.fwxg.com  AAAA  2001:db8::1
+```
+
+---
+
+## 部署方式选择
+
+本项目支持两种部署方式：
+
+| 部署方式 | 适用场景 | 优点 | 缺点 |
+|---------|---------|------|------|
+| **Docker部署** | 推荐，适合现代Linux系统 | 环境一致、部署简单、易扩展 | 需要Docker环境，CentOS 6不支持 |
+| **传统部署** | 老旧系统（如CentOS 6） | 不依赖Docker | 配置复杂、环境差异 |
+
+> ⚠️ **重要提示**：CentOS 6.8 不支持Docker（内核版本要求3.10+），必须使用传统部署方式。
+>
+> CentOS 6已于2020年11月停止维护，建议尽快升级到CentOS 7/8或Rocky Linux/AlmaLinux。
+
+---
+
+## 方式一：Docker容器化部署（推荐）
+
+### 前置要求
+
+- Docker 20.10+
+- Docker Compose 2.0+
+
+### 快速开始
+
+```bash
+# 1. 克隆项目
+git clone <repo-url> domain-manager
+cd domain-manager
+
+# 2. 配置环境变量
+cp backend/.env.example backend/.env
+# 编辑 backend/.env 填入真实配置
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 访问应用
+# 前端: http://localhost
+# API: http://localhost/api
+# 健康检查: http://localhost/api/health
+```
+
+### Docker架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Docker Host                          │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │
+│  │   Nginx     │  │  Frontend   │  │   Backend   │     │
+│  │  (端口80)   │  │  (端口3000) │  │  (端口8000) │     │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │
+│         │                │                │             │
+│         └────────────────┴────────────────┘             │
+│                         │                               │
+│                    docker network                       │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 常用Docker命令
+
+```bash
+# 查看服务状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+# 停止服务
+docker-compose down
+
+# 重启服务
+docker-compose restart
+
+# 重新构建并启动
+docker-compose up -d --build
+
+# 进入容器
+docker exec -it domain-manager-backend bash
+```
+
+### 数据持久化
+
+Docker部署使用Volume持久化数据：
+
+| Volume | 说明 |
+|--------|------|
+| backend_data | SQLite数据库文件 |
+| backend_logs | 后端日志 |
+| nginx_logs | Nginx日志 |
+
+### 生产环境Docker配置
+
+对于生产环境，建议：
+
+1. **配置域名和SSL**
+```bash
+# 修改nginx/conf.d/domainmanager.conf
+# 配置真实的域名和SSL证书
+```
+
+2. **修改docker-compose.yml端口**
+```yaml
+# 仅暴露必要端口
+ports:
+  - "80:80"
+  - "443:443"
+# 不暴露8000端口
+```
+
+3. **配置环境变量**
+```bash
+# 使用强密钥
+JWT_SECRET_KEY=<strong-secret>
+ENCRYPTION_KEY=<fernet-key>
+```
+
+---
+
+## Ubuntu 22.04 LTS 部署指南（推荐）
+
+### 系统要求
+
+| 项目 | 要求 |
+|------|------|
+| 系统 | Ubuntu Server 22.04 LTS |
+| 内存 | 最低2GB，推荐4GB |
+| 磁盘 | 最低20GB |
+| 用户 | 需要sudo权限 |
+
+### 1. 系统更新
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+### 2. 安装Docker
+
+```bash
+# 安装依赖
+sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
+
+# 添加Docker官方GPG密钥
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+# 添加Docker仓库
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# 安装Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io
+
+# 启动Docker并设置开机启动
+sudo systemctl start docker
+sudo systemctl enable docker
+
+# 将当前用户添加到docker组（免sudo运行docker）
+sudo usermod -aG docker $USER
+
+# 重新登录后生效，或执行：
+newgrp docker
+```
+
+### 3. 安装Docker Compose
+
+```bash
+# 下载Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+
+# 添加执行权限
+sudo chmod +x /usr/local/bin/docker-compose
+
+# 验证安装
+docker-compose --version
+```
+
+### 4. 部署项目
+
+```bash
+# 克隆项目
+cd /opt
+sudo git clone https://github.com/953641016/domain-manager.git
+sudo chown -R $USER:$USER domain-manager
+cd domain-manager
+
+# 配置环境变量
+cp backend/.env.example backend/.env
+nano backend/.env  # 编辑配置文件
+
+# 启动服务
+docker-compose up -d
+
+# 查看状态
+docker-compose ps
+```
+
+### 5. 配置防火墙
+
+```bash
+# 允许HTTP和HTTPS
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# 启用防火墙
+sudo ufw enable
+sudo ufw status
+```
+
+### 6. 配置域名和SSL（推荐）
+
+#### 6.1 初始配置SSL证书
+
+```bash
+# 安装Certbot
+sudo apt install -y certbot
+
+# 获取SSL证书（使用standalone模式）
+sudo certbot certonly --standalone -d d.fwxg.com
+
+# 查看证书
+sudo ls -la /etc/letsencrypt/live/d.fwxg.com/
+```
+
+#### 6.2 配置Nginx使用SSL证书
+
+```bash
+# 创建证书目录
+mkdir -p nginx/ssl
+
+# 复制证书（或创建软链接）
+sudo cp /etc/letsencrypt/live/d.fwxg.com/fullchain.pem nginx/ssl/
+sudo cp /etc/letsencrypt/live/d.fwxg.com/privkey.pem nginx/ssl/
+
+# 或创建软链接（推荐）
+sudo ln -sf /etc/letsencrypt/live/d.fwxg.com/fullchain.pem nginx/ssl/
+sudo ln -sf /etc/letsencrypt/live/d.fwxg.com/privkey.pem nginx/ssl/
+```
+
+#### 6.3 SSL证书自动管理
+
+系统已集成SSL证书管理功能，包括：
+- **自动检查**：定时检查证书到期状态（30天警告，7天紧急）
+- **自动续期**：到期前3天自动续期
+- **手动管理**：提供命令行工具
+
+> ⚠️ **重要说明**：此SSL证书管理功能针对系统自身的Web访问域名（d.fwxg.com），不用于管理系统所管理的业务域名的SSL证书。
+
+**使用SSL管理工具：**
+
+```bash
+# 进入后端目录
+cd backend
+
+# 1. 列出所有SSL证书
+python scripts/ssl_manager.py list
+
+# 2. 检查即将到期的证书
+python scripts/ssl_manager.py check
+
+# 3. 手动续期指定域名的证书
+python scripts/ssl_manager.py renew d.fwxg.com
+
+# 4. 自动续期3天内到期的证书
+python scripts/ssl_manager.py auto-renew
+```
+
+**配置定时任务（推荐）：**
+
+```bash
+# 编辑crontab
+sudo crontab -e
+
+# 添加每天凌晨2点检查并自动续期SSL证书
+0 2 * * * cd /opt/domain-manager/backend && source venv/bin/activate && python scripts/ssl_manager.py auto-renew >> /var/log/ssl-renew.log 2>&1
+
+# （可选）使用系统自带的certbot timer（更推荐）
+sudo systemctl enable --now certbot.timer
+```
+
+#### 6.4 Nginx SSL配置示例
+
+创建或编辑 `nginx/conf.d/ssl.conf`：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+
+    server_name d.fwxg.com;
+
+    # SSL证书配置
+    ssl_certificate /etc/letsencrypt/live/d.fwxg.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/d.fwxg.com/privkey.pem;
+
+    # SSL安全配置
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    ssl_prefer_server_ciphers on;
+
+    # HSTS
+    add_header Strict-Transport-Security "max-age=31536000" always;
+
+    # 前端静态文件
+    location / {
+        root /usr/share/nginx/html;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API代理
+    location /api {
+        proxy_pass http://backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# HTTP重定向到HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+
+    server_name d.fwxg.com;
+
+    # Let's Encrypt验证路径
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    # 其他请求重定向到HTTPS
+    location / {
+        return 301 https://$server_name$request_uri;
+    }
+}
+```
+
+#### 6.5 验证SSL配置
+
+```bash
+# 重启服务
+docker-compose restart nginx
+
+# 检查证书状态
+python scripts/ssl_manager.py check
+```
+
+### 7. 常用管理命令
+
+```bash
+# 查看日志
+docker-compose logs -f
+
+# 重启服务
+docker-compose restart
+
+# 停止服务
+docker-compose down
+
+# 更新代码
+git pull
+docker-compose up -d --build
+```
+
+---
+
+## 方式二：传统部署
+
+### 一、技术栈
+
+#### 1.1 完整技术栈
 
 | 层级 | 技术 | 版本/说明 |
 |------|------|----------|
@@ -46,7 +435,7 @@
                               ┌───────────────────────────────┐
                               │   Nginx (端口 80/443)         │
                               │   ┌───────────────────────────┐│
-                              │   │ 域名管家: domain.your.com ││
+                              │   │ 域名管家: d.fwxg.com       ││
                               │   │  (反向代理 -> localhost:8000)││
                               │   └───────────────────────────┘│
                               │   ┌───────────────────────────┐│
@@ -238,8 +627,8 @@ sudo journalctl -u domainmgr -f
 server {
     listen 80;
     listen [::]:80;
-    server_name domain.yourcompany.com;  # 使用独立域名
-    
+    server_name d.fwxg.com;  # 使用独立域名
+
     # 日志
     access_log /var/log/nginx/domainmgr_access.log;
     error_log /var/log/nginx/domainmgr_error.log;
@@ -248,7 +637,7 @@ server {
     location / {
         root /opt/domainmgr/domainmgr/frontend/dist;
         try_files $uri $uri/ /index.html;
-        
+
         # 缓存静态文件
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
             expires 1y;
@@ -263,12 +652,12 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # WebSocket支持
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        
+
         # 超时设置
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
@@ -282,7 +671,7 @@ server {
     listen 80;
     listen [::]:80;
     server_name php1.yourcompany.com;
-    
+
     # PHP-FPM配置
     location ~ \.php$ {
         fastcgi_pass unix:/var/run/php-fpm/php1.sock;
@@ -299,25 +688,25 @@ server {
 server {
     listen 80;
     server_name yourcompany.com;
-    
+
     # 域名管家在 /domainmgr 路径下
     location /domainmgr {
         alias /opt/domainmgr/domainmgr/frontend/dist;
         try_files $uri $uri/ /domainmgr/index.html;
     }
-    
+
     location /domainmgr/api {
         rewrite ^/domainmgr/(.*) /$1 break;
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
     }
-    
+
     # PHP项目保持在根路径或其他路径
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
-    
+
     location ~ \.php$ {
         fastcgi_pass unix:/var/run/php-fpm/www.sock;
         include fastcgi_params;
@@ -332,7 +721,7 @@ server {
 sudo yum install -y certbot python3-certbot-nginx
 
 # 申请证书
-sudo certbot --nginx -d domain.yourcompany.com
+sudo certbot --nginx -d d.fwxg.com
 
 # 自动续期
 sudo certbot renew --dry-run
@@ -363,7 +752,7 @@ sudo systemctl status nginx
 APP_NAME=域名管家
 APP_ENV=production
 APP_DEBUG=false
-APP_URL=https://domain.yourcompany.com
+APP_URL=https://d.fwxg.com
 
 # 数据库
 DATABASE_URL=sqlite:////opt/domainmgr/domainmgr/data/domainmgr.db
@@ -578,11 +967,10 @@ df -h /opt/domainmgr
 - [ ] .env文件权限正确（0700）
 - [ ] Systemd服务已配置并开机启动
 - [ ] Nginx反向代理配置正确
-- [ ] 独立的域名或路径配置
+- [ ] 独立的域名（d.fwxg.com）配置
 - [ ] SSL证书已配置
 - [ ] 日志轮转已设置
 - [ ] 自动备份脚本已配置
 - [ ] 防火墙规则已配置
 - [ ] Fail2Ban已启用
 - [ ] 已完成全流程测试（注册、解析、审批）
-

@@ -17,17 +17,19 @@ class User(Base):
     
     # 用户信息
     name = Column(String(100), nullable=False, comment="用户姓名")
+    en_name = Column(String(100), nullable=True, comment="英文名")
     email = Column(String(255), nullable=True, index=True, comment="邮箱")
     phone = Column(String(50), nullable=True, comment="手机号")
+    avatar_url = Column(String(500), nullable=True, comment="头像URL")
     department = Column(String(100), nullable=True, comment="部门")
     
     # 飞书身份
-    feishu_userid = Column(String(100), nullable=False, unique=True, index=True, comment="飞书用户ID")
-    feishu_unionid = Column(String(100), nullable=True, comment="飞书UnionID")
-    feishu_openid = Column(String(100), nullable=True, comment="飞书OpenID")
+    feishu_user_id = Column(String(100), nullable=True, unique=True, index=True, comment="飞书用户ID")
+    feishu_union_id = Column(String(100), nullable=True, index=True, comment="飞书UnionID")
+    feishu_open_id = Column(String(100), nullable=True, comment="飞书OpenID")
     
     # 权限配置
-    role = Column(String(20), nullable=False, default="business", comment="用户角色: business/domain_spec/admin")
+    role = Column(String(20), nullable=False, default="business", comment="用户角色: business/domain_spec/admin/super_admin")
     permissions = Column(JSON, default=list, comment="自定义权限列表")
     
     # 状态
@@ -39,3 +41,23 @@ class User(Base):
     
     # 备注
     remark = Column(String(500), nullable=True, comment="备注")
+
+    def to_dict(self):
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "en_name": self.en_name,
+            "email": self.email,
+            "phone": self.phone,
+            "avatar_url": self.avatar_url,
+            "department": self.department,
+            "feishu_user_id": self.feishu_user_id,
+            "feishu_union_id": self.feishu_union_id,
+            "role": self.role,
+            "permissions": self.permissions,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+            "remark": self.remark,
+        }

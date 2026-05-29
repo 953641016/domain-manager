@@ -21,7 +21,7 @@ import DomainDetailPage from '@/pages/Domains/Detail';
 import ExpirationPage from '@/pages/Expiration';
 import StatisticsPage from '@/pages/Statistics';
 import LogsPage from '@/pages/Logs';
-import ConfigPages from '@/pages/Config';
+import ConfigPage from '@/pages/Config';
 import ForbiddenPage from '@/pages/Errors/Forbidden';
 import NotFoundPage from '@/pages/Errors/NotFound';
 
@@ -109,10 +109,10 @@ function AppRouter() {
 
           {/* 系统配置 - 仅管理员可见 */}
           <Route
-            path="config/*"
+            path="config"
             element={
               <PermissionRoute allowedRoles={[UserRole.ADMIN]}>
-                <ConfigPages />
+                <ConfigPage />
               </PermissionRoute>
             }
           />

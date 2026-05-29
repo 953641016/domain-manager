@@ -49,3 +49,41 @@ export async function getFeishuUserById(user_id: string): Promise<{
   const response = await api.get(`/feishu/user/${user_id}`);
   return response.data;
 }
+
+/**
+ * 发送飞书文本消息
+ */
+export async function sendFeishuMessage(
+  receive_id: string,
+  content: string,
+  receive_id_type: string = 'open_id'
+): Promise<{
+  success: boolean;
+  data: any;
+}> {
+  const response = await api.post('/feishu/send-message', {
+    receive_id,
+    content,
+    receive_id_type
+  });
+  return response.data;
+}
+
+/**
+ * 发送飞书交互式卡片
+ */
+export async function sendFeishuCard(
+  receive_id: string,
+  card_content: any,
+  receive_id_type: string = 'open_id'
+): Promise<{
+  success: boolean;
+  data: any;
+}> {
+  const response = await api.post('/feishu/send-card', {
+    receive_id,
+    card_content,
+    receive_id_type
+  });
+  return response.data;
+}
