@@ -1,0 +1,47 @@
+# robots.txt for 域名管家
+
+# ============================================
+# 搜索引擎爬虫访问控制
+# ============================================
+
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /admin/
+Disallow: /manage/
+Disallow: /config/
+Disallow: /settings/
+Disallow: /private/
+Disallow: /*.json$
+Disallow: /*.xml$
+
+# 允许访问首页和静态资源
+Allow: /index.html
+Allow: /static/
+Allow: /assets/
+Allow: /favicon.ico
+
+# Sitemap 位置（可选）
+Sitemap: https://d.fwxg.com/domainmgr/sitemap.xml
+
+# ============================================
+# 爬虫访问频率控制（建议）
+# ============================================
+Crawl-delay: 1
+
+# ============================================
+# 特殊爬虫配置
+# ============================================
+
+# 禁止恶意爬虫
+User-agent: AhrefsBot
+Disallow: /
+
+User-agent: SemrushBot
+Disallow: /
+
+User-agent: MJ12bot
+Disallow: /
+
+User-agent: DotBot
+Disallow: /
