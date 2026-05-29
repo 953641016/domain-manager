@@ -169,7 +169,7 @@ curl https://d.fwxg.com
 在飞书开放平台：
 1. 进入应用详情页
 2. 找到"安全设置"
-3. 添加重定向URL: `https://d.fwxg.com/api/v1/auth/feishu/callback`
+3. 添加重定向URL: `https://d.fwxg.com/dm/api/v1/auth/feishu/callback`
 
 ### 3. 获取超级管理员飞书用户ID
 
