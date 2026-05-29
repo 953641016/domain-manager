@@ -9,15 +9,15 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     
-    base: env.VITE_BASE_PATH || '/domainmgr',
+    base: env.VITE_BASE_PATH || '/dm',
     
     server: {
       port: 3000,
       proxy: {
-        '/domainmgr/api': {
+        '/dm/api': {
           target: 'http://localhost:8000',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/domainmgr/, ''),
+          rewrite: (path) => path.replace(/^\/dm/, ''),
         },
       },
     },

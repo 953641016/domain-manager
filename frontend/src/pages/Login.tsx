@@ -35,7 +35,7 @@ export default function LoginPage() {
 
   const fetchOAuthUrl = async () => {
     try {
-      const redirectUri = `${window.location.origin}/api/v1/auth/callback`;
+      const redirectUri = `${window.location.origin}/dm/api/v1/auth/callback`;
       const response = await api.get('/auth/oauth-url', {
         params: { redirect_uri: redirectUri }
       });

@@ -22,7 +22,7 @@ Allow: /assets/
 Allow: /favicon.ico
 
 # Sitemap 位置（可选）
-Sitemap: https://d.fwxg.com/domainmgr/sitemap.xml
+Sitemap: https://d.fwxg.com/dm/sitemap.xml
 
 # ============================================
 # 爬虫访问频率控制（建议）

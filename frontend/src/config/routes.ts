@@ -7,7 +7,7 @@
 
 // 获取基础路径配置
 const getBasePath = (): string => {
-  return import.meta.env.VITE_BASE_PATH || '/domainmgr';
+  return import.meta.env.VITE_BASE_PATH || '/dm';
 };
 
 // API 基础路径
