@@ -146,13 +146,13 @@ const UserManagement: React.FC = () => {
       loadUsers();
     } catch (error: any) {
       console.error('保存失败:', error);
-      alert(`保存失败: ${error.response?.data?.detail || error.message}`);
+      alert('保存失败: ' + (error.response?.data?.detail || error.message));
     }
   };
 
   // 删除用户
   const handleDelete = async (user: User) => {
-    if (!confirm(`确定要删除用户 "${user.name}" 吗？')) {
+    if (!confirm('确定要删除用户 "' + user.name + '" 吗？')) {
       return;
     }
 
@@ -162,13 +162,13 @@ const UserManagement: React.FC = () => {
       loadUsers();
     } catch (error: any) {
       console.error('删除失败:', error);
-      alert(`删除失败: ${error.response?.data?.detail || error.message}`);
+      alert('删除失败: ' + (error.response?.data?.detail || error.message));
     }
   };
 
   // 激活用户
   const handleActivate = async (user: User) => {
-    if (!confirm(`确定要激活用户 "${user.name}" 吗？`)) {
+    if (!confirm('确定要激活用户 "' + user.name + '" 吗？')) {
       return;
     }
 
@@ -178,7 +178,7 @@ const UserManagement: React.FC = () => {
       loadUsers();
     } catch (error: any) {
       console.error('激活失败:', error);
-      alert(`激活失败: ${error.response?.data?.detail || error.message}`);
+      alert('激活失败: ' + (error.response?.data?.detail || error.message));
     }
   };
 
@@ -216,7 +216,7 @@ const UserManagement: React.FC = () => {
       };
     } catch (error: any) {
       console.error('获取OAuth URL失败:', error);
-      alert(`获取飞书授权URL失败: ${error.response?.data?.detail || error.message}`);
+      alert('获取飞书授权URL失败: ' + (error.response?.data?.detail || error.message));
       setShowQRModal(false);
     } finally {
       setQrLoading(false);
@@ -244,7 +244,7 @@ const UserManagement: React.FC = () => {
       alert('用户信息获取成功，请确认信息后保存！');
     } catch (error: any) {
       console.error('获取用户信息失败:', error);
-      alert(`获取飞书用户信息失败: ${error.response?.data?.detail || error.message}`);
+      alert('获取飞书用户信息失败: ' + (error.response?.data?.detail || error.message));
     } finally {
       setQrLoading(false);
     }
@@ -383,12 +383,7 @@ const UserManagement: React.FC = () => {
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                      user.role === 'admin' ? 'bg-red-100 text-red-800' :
-                      user.role === 'domain_spec' ? 'bg-blue-100 text-blue-800' :
-                      'bg-gray-100 text-gray-800'
-                      }`}
-                      >
+                      <span className={"inline-flex px-2 py-1 text-xs font-semibold rounded-full " + (user.role === 'admin' ? 'bg-red-100 text-red-800' : user.role === 'domain_spec' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-800')}>
                         {getRoleLabel(user.role)}
                       </span>
                     </td>
@@ -396,11 +391,7 @@ const UserManagement: React.FC = () => {
                       {user.feishu_userid}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        user.is_active ? 'bg-green-100 text-green-800' :
-                        'bg-red-100 text-red-800'
-                      }`}
-                      >
+                      <span className={"inline-flex px-2 py-1 text-xs font-semibold rounded-full " + (user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800')}>
                         {user.is_active ? '启用' : '禁用'}
                       </span>
                     </td>

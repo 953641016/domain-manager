@@ -66,3 +66,9 @@ __pycache__/
 # SSH Keys
 zj.pem
 zj*
+
+# 脚本和临时文件
+query_dnspod_domain_id.py
+scripts/install_docker.sh
+scripts/setup_docker_mirror.sh
+scripts/setup_server.sh
