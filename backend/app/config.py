@@ -52,6 +52,12 @@ class Config:
     GODADDY_API_SECRET = os.getenv("GODADDY_API_SECRET", "")
 
     # --------------------------------------------------------------------------
+    # DNSPod (腾讯云) 配置
+    # --------------------------------------------------------------------------
+    DNSPOD_SECRET_ID = os.getenv("DNSPOD_SECRET_ID", "")
+    DNSPOD_SECRET_KEY = os.getenv("DNSPOD_SECRET_KEY", "")
+
+    # --------------------------------------------------------------------------
     # 数据库配置
     # --------------------------------------------------------------------------
     DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./data/domain_manager.db")

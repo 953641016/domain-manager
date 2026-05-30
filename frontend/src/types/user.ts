@@ -2,6 +2,13 @@
  * 用户类型定义
  */
 
+export enum UserRole {
+  SUPER_ADMIN = 'super_admin',
+  ADMIN = 'admin',
+  DOMAIN_SPEC = 'domain_spec',
+  BUSINESS = 'business',
+}
+
 export interface User {
   id: number;
   name: string;

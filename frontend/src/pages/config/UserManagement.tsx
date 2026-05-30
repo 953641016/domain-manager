@@ -232,7 +232,7 @@ const UserManagement: React.FC = () => {
       // 自动填充表单
       setFormData({
         name: feishuUser.name,
-        feishu_user_id: feishuUser.user_id,
+        feishu_userid: feishuUser.user_id,
         role: 'business',
         email: feishuUser.email || '',
         phone: feishuUser.mobile || '',
@@ -254,7 +254,7 @@ const UserManagement: React.FC = () => {
   const fillFeishuUserInfo = (feishuUser: FeishuUserInfo) => {
     setFormData({
       name: feishuUser.name,
-      feishu_user_id: feishuUser.user_id,
+      feishu_userid: feishuUser.user_id,
       role: 'business',
       email: feishuUser.email || '',
       phone: feishuUser.mobile || '',

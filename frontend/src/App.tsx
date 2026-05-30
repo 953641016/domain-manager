@@ -6,7 +6,7 @@
  */
 
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { APP_BASE_PATH } from './routes';
+import { APP_BASE_PATH } from './config/routes';
 
 // 布局组件
 import MainLayout from '@/layouts/MainLayout';

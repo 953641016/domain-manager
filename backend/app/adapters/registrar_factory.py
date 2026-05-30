@@ -5,6 +5,7 @@
 from typing import Optional
 from app.adapters.base import BaseRegistrarAdapter, BaseDnsProviderAdapter
 from app.adapters.cloudflare import CloudflareRegistrarAdapter, CloudflareDnsProviderAdapter
+from app.adapters.dnspod import DnspodDnsProviderAdapter
 from app.adapters.godaddy import GoDaddyRegistrarAdapter
 from app.config import Config
 
@@ -16,7 +17,7 @@ class RegistrarFactory:
     SUPPORTED_REGISTRARS = ["cloudflare", "godaddy", "namecheap", "enom"]
 
     # 支持的DNS解析商
-    SUPPORTED_DNS_PROVIDERS = ["cloudflare"]
+    SUPPORTED_DNS_PROVIDERS = ["cloudflare", "dnspod"]
 
     @classmethod
     def create_registrar(cls, code: str, api_key: str, api_secret: Optional[str] = None, account_id: Optional[str] = None) -> BaseRegistrarAdapter:
@@ -60,6 +61,10 @@ class RegistrarFactory:
 
         if code == "cloudflare":
             return CloudflareDnsProviderAdapter(api_key=api_key)
+        elif code == "dnspod":
+            if not api_secret:
+                raise ValueError("DNSPod需要提供SecretKey")
+            return DnspodDnsProviderAdapter(api_key=api_key, api_secret=api_secret)
         else:
             raise ValueError(f"不支持的DNS解析商: {code}，支持的解析商: {cls.SUPPORTED_DNS_PROVIDERS}")
 
@@ -128,6 +133,13 @@ class RegistrarFactory:
                 "name": "Cloudflare",
                 "description": "Cloudflare DNS，提供免费和付费DNS解析服务",
                 "supports_anycast": True,
+                "max_records": 10000
+            },
+            "dnspod": {
+                "code": "dnspod",
+                "name": "DNSPod",
+                "description": "DNSPod (腾讯云)，国内主流DNS解析服务",
+                "supports_anycast": False,
                 "max_records": 10000
             }
         }
