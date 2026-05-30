@@ -452,7 +452,7 @@ const UserManagement: React.FC = () => {
             </button>
           </div>
         </div>
-      </div>
+      )}
 
       {/* 用户编辑/新建弹窗 */}
       {showModal && (
