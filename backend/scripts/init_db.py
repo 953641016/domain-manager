@@ -15,6 +15,10 @@ from app.models.user import User
 from app.models.permission import ROLE_PERMISSIONS
 from app.config import Config
 from app.models.user_confirmation import UserOperationConfirmation
+from app.models.domain import Domain, RegAccount, DnsAccount
+from app.models.dns import DnsRecord
+from app.models.audit import AuditLog
+from app.models.request import Request
 
 
 def init_db():
