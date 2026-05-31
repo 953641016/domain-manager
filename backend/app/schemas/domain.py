@@ -80,6 +80,7 @@ class RegAccountCreate(BaseModel):
     api_key: Optional[str] = Field(None, description="API Key")
     api_secret: Optional[str] = Field(None, description="API Secret")
     remark: Optional[str] = Field(None, description="备注")
+    target_owner_id: Optional[int] = Field(None, description="归属专员 ID（super_admin 创建时指定；domain_spec 忽略此字段）")
 
 
 class RegAccountUpdate(BaseModel):
@@ -97,6 +98,7 @@ class RegAccountResponse(BaseModel):
     name: str
     registrar_code: str
     owner_id: Optional[int] = None
+    owner_name: Optional[str] = None   # 归属专员姓名（API 层填充）
     is_active: bool
     remark: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -113,6 +115,7 @@ class DnsAccountCreate(BaseModel):
     api_key: Optional[str] = Field(None, description="API Key")
     api_secret: Optional[str] = Field(None, description="API Secret")
     remark: Optional[str] = Field(None, description="备注")
+    target_owner_id: Optional[int] = Field(None, description="归属专员 ID（super_admin 创建时指定；domain_spec 忽略此字段）")
 
 
 class DnsAccountUpdate(BaseModel):
@@ -130,6 +133,7 @@ class DnsAccountResponse(BaseModel):
     name: str
     provider_code: str
     owner_id: Optional[int] = None
+    owner_name: Optional[str] = None   # 归属专员姓名（API 层填充）
     is_active: bool
     remark: Optional[str] = None
     created_at: Optional[datetime] = None

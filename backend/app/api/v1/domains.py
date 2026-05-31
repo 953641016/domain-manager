@@ -27,6 +27,22 @@ router = APIRouter(
 )
 
 
+def _build_owner_map(db: Session, accounts) -> dict:
+    """批量查归属专员姓名，返回 {owner_id: name}"""
+    owner_ids = {a.owner_id for a in accounts if a.owner_id}
+    if not owner_ids:
+        return {}
+    users = db.query(User).filter(User.id.in_(owner_ids)).all()
+    return {u.id: u.name for u in users}
+
+
+def _with_owner(response_cls, account, owner_map: dict):
+    """将 ORM 对象 + owner_name 合并为 response schema"""
+    obj = response_cls.model_validate(account)
+    obj.owner_name = owner_map.get(account.owner_id) if account.owner_id else None
+    return obj
+
+
 # ========== 域名管理 ==========
 
 @router.get("", response_model=DomainListResponse)
@@ -132,34 +148,31 @@ def get_reg_accounts(
     current_user: User = Depends(require_view_accounts),  # admin 无此权限 → 403
     db: Session = Depends(get_db),
 ):
-    """获取注册账号列表（domain_spec 只见自己的；super_admin 见全部）"""
+    """获取注册账号列表（domain_spec 只见自己的；super_admin 见全部含归属专员姓名）"""
     service = DomainService(db)
     owner_id = current_user.id if current_user.role == "domain_spec" else None
     accounts = service.get_reg_accounts(
         skip=skip, limit=limit, registrar_code=registrar_code, owner_id=owner_id
     )
-    return {"total": len(accounts), "items": [RegAccountResponse.model_validate(a) for a in accounts]}
+    owner_map = _build_owner_map(db, accounts)
+    return {"total": len(accounts), "items": [_with_owner(RegAccountResponse, a, owner_map) for a in accounts]}
 
 
 @router.get("/accounts/reg/{account_id}", response_model=RegAccountResponse)
 def get_reg_account(
     account_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_view_accounts),
     db: Session = Depends(get_db),
 ):
-    """
-    获取注册账号详情
-    """
+    """获取注册账号详情（domain_spec 只能查自己的，super_admin 不限）"""
     service = DomainService(db)
     account = service.get_reg_account(account_id)
-
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
-        )
-
-    return RegAccountResponse.model_validate(account)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
+    if current_user.role == "domain_spec" and account.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人账号")
+    owner_map = _build_owner_map(db, [account])
+    return _with_owner(RegAccountResponse, account, owner_map)
 
 
 def _check_account_ownership(db, account_id: int, current_user: User, model_class) -> None:
@@ -200,12 +213,19 @@ def create_reg_account(
     current_user: User = Depends(require_manage_accounts),  # admin → 403
     db: Session = Depends(get_db),
 ):
-    """新增注册账号（domain_spec/super_admin 均需超管飞书确认）"""
+    """新增注册账号（domain_spec/super_admin 均需超管飞书确认）
+    owner 规则：domain_spec → 自己；super_admin → target_owner_id 或自己
+    """
+    if current_user.role == "super_admin" and data.target_owner_id:
+        owner_id = data.target_owner_id
+    else:
+        owner_id = current_user.id
     masked = ("****" + data.api_key[-4:]) if data.api_key and len(data.api_key) >= 4 else "****"
+    payload = data.model_dump(exclude={"target_owner_id"})
     return _make_confirmation(
         db, current_user,
         ConfirmationOperationType.ADD_REG_ACCOUNT,
-        details={"data": data.model_dump(), "owner_id": current_user.id},
+        details={"data": payload, "owner_id": owner_id},
         api_key_masked=masked,
     )
 
@@ -253,36 +273,31 @@ def get_dns_accounts(
     current_user: User = Depends(require_view_accounts),  # admin → 403
     db: Session = Depends(get_db),
 ):
-    """
-    获取DNS账号列表
-    """
+    """获取DNS账号列表（domain_spec 只见自己的；super_admin 见全部含归属专员姓名）"""
     service = DomainService(db)
     owner_id = current_user.id if current_user.role == "domain_spec" else None
     accounts = service.get_dns_accounts(
         skip=skip, limit=limit, provider_code=provider_code, owner_id=owner_id
     )
-    return {"total": len(accounts), "items": [DnsAccountResponse.model_validate(a) for a in accounts]}
+    owner_map = _build_owner_map(db, accounts)
+    return {"total": len(accounts), "items": [_with_owner(DnsAccountResponse, a, owner_map) for a in accounts]}
 
 
 @router.get("/accounts/dns/{account_id}", response_model=DnsAccountResponse)
 def get_dns_account(
     account_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_view_accounts),
     db: Session = Depends(get_db),
 ):
-    """
-    获取DNS账号详情
-    """
+    """获取DNS账号详情（domain_spec 只能查自己的，super_admin 不限）"""
     service = DomainService(db)
     account = service.get_dns_account(account_id)
-
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
-        )
-
-    return DnsAccountResponse.model_validate(account)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
+    if current_user.role == "domain_spec" and account.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人账号")
+    owner_map = _build_owner_map(db, [account])
+    return _with_owner(DnsAccountResponse, account, owner_map)
 
 
 @router.post("/accounts/dns")
@@ -291,17 +306,21 @@ def create_dns_account(
     current_user: User = Depends(require_manage_accounts),  # admin → 403
     db: Session = Depends(get_db),
 ):
-    """新增解析账号（domain_spec/super_admin 均需超管飞书确认）"""
+    """新增解析账号（domain_spec/super_admin 均需超管飞书确认）
+    owner 规则：domain_spec → 自己；super_admin → target_owner_id 或自己
+    """
+    if current_user.role == "super_admin" and data.target_owner_id:
+        owner_id = data.target_owner_id
+    else:
+        owner_id = current_user.id
     masked = ("****" + data.api_key[-4:]) if data.api_key and len(data.api_key) >= 4 else "****"
+    payload = data.model_dump(exclude={"target_owner_id"})
     return _make_confirmation(
         db, current_user,
         ConfirmationOperationType.ADD_DNS_ACCOUNT,
-        details={"data": data.model_dump(), "owner_id": current_user.id},
+        details={"data": payload, "owner_id": owner_id},
         api_key_masked=masked,
     )
-    service = DomainService(db)
-    account = service.create_dns_account(data, owner_id=current_user.id)
-    return DnsAccountResponse.model_validate(account)
 
 
 @router.put("/accounts/dns/{account_id}")

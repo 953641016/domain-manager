@@ -1,10 +1,29 @@
 /**
  * 系统配置页面
+ *
+ * sections 控制显示哪些 Tab：
+ *   accounts  页 → ['reg-accounts', 'dns-accounts']
+ *   providers 页 → ['registrar', 'dns', 'defaults']
+ *
+ * 账号归属规则（与后端一致）：
+ *   - domain_spec：只能看/改自己的账号（owner_id = self）
+ *   - super_admin：可见全部账号（含归属专员列）；新建时可指定归属专员
  */
 import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
 import UserManagement from './config/UserManagement';
 import { formatDateTime } from '@/utils/datetime';
+
+// ==================== 当前登录用户（localStorage） ====================
+function getCurrentUser(): { id: number; role: string; name: string } {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    return { id: 0, role: '', name: '' };
+  }
+}
+
+// ==================== 类型定义 ====================
 
 interface RegistrarInfo {
   id: number;
@@ -29,6 +48,7 @@ interface RegAccount {
   name: string;
   registrar_code: string;
   owner_id: number | null;
+  owner_name: string | null;   // 归属专员姓名（后端填充）
   is_active: boolean;
   remark: string | null;
   created_at: string | null;
@@ -40,6 +60,7 @@ interface DnsAccount {
   name: string;
   provider_code: string;
   owner_id: number | null;
+  owner_name: string | null;   // 归属专员姓名（后端填充）
   is_active: boolean;
   remark: string | null;
   created_at: string | null;
@@ -53,30 +74,38 @@ interface DefaultConfig {
   default_dns_account_id: number | null;
 }
 
+/** 用于"归属专员"下拉的精简用户信息 */
+interface SpecialistOption {
+  id: number;
+  name: string;
+  role: string;
+}
+
 type TabKey = 'registrar' | 'dns' | 'reg-accounts' | 'dns-accounts' | 'defaults' | 'users';
 
 const ALL_TABS: { key: TabKey; label: string }[] = [
-  { key: 'registrar', label: '注册商' },
-  { key: 'dns', label: 'DNS服务商' },
+  { key: 'registrar',    label: '注册商' },
+  { key: 'dns',          label: 'DNS服务商' },
   { key: 'reg-accounts', label: '注册账号' },
   { key: 'dns-accounts', label: 'DNS账号' },
-  { key: 'defaults', label: '默认配置' },
-  { key: 'users', label: '用户管理' },
+  { key: 'defaults',     label: '默认配置' },
+  { key: 'users',        label: '用户管理' },
 ];
 
 interface ConfigPageProps {
-  /** 仅渲染指定分区的 Tab，缺省渲染全部 */
   sections?: TabKey[];
-  /** 页面标题 */
   title?: string;
 }
 
+// ==================== 主组件 ====================
+
 export default function ConfigPage({ sections, title = '系统配置' }: ConfigPageProps) {
-  const TABS = sections
-    ? ALL_TABS.filter((t) => sections.includes(t.key))
-    : ALL_TABS;
+  const TABS = sections ? ALL_TABS.filter((t) => sections.includes(t.key)) : ALL_TABS;
   const [activeTab, setActiveTab] = useState<TabKey>(TABS[0]?.key ?? 'registrar');
   const [loading, setLoading] = useState(true);
+
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser.role === 'super_admin';
 
   // ========== 注册商 & DNS 服务商 ==========
   const [registrars, setRegistrars] = useState<RegistrarInfo[]>([]);
@@ -87,14 +116,23 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const [regAccountsLoading, setRegAccountsLoading] = useState(false);
   const [showRegModal, setShowRegModal] = useState(false);
   const [editingRegAccount, setEditingRegAccount] = useState<RegAccount | null>(null);
-  const [regForm, setRegForm] = useState({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '' });
+  const [regForm, setRegForm] = useState({
+    name: '', registrar_code: '', api_key: '', api_secret: '', remark: '',
+    target_owner_id: '' as string | number,  // super_admin 新建时指定归属
+  });
 
   // ========== DNS 账号 ==========
   const [dnsAccounts, setDnsAccounts] = useState<DnsAccount[]>([]);
   const [dnsAccountsLoading, setDnsAccountsLoading] = useState(false);
   const [showDnsModal, setShowDnsModal] = useState(false);
   const [editingDnsAccount, setEditingDnsAccount] = useState<DnsAccount | null>(null);
-  const [dnsForm, setDnsForm] = useState({ name: '', provider_code: '', api_key: '', api_secret: '', remark: '' });
+  const [dnsForm, setDnsForm] = useState({
+    name: '', provider_code: '', api_key: '', api_secret: '', remark: '',
+    target_owner_id: '' as string | number,
+  });
+
+  // ========== 归属专员候选列表（super_admin 新建时用） ==========
+  const [specialists, setSpecialists] = useState<SpecialistOption[]>([]);
 
   // ========== 默认配置 ==========
   const [defaultConfig, setDefaultConfig] = useState<DefaultConfig>({
@@ -108,23 +146,26 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   // ========== 注册商 CRUD 模态框 ==========
   const [showRegistrarModal, setShowRegistrarModal] = useState(false);
   const [editingRegistrar, setEditingRegistrar] = useState<RegistrarInfo | null>(null);
-  const [registrarForm, setRegistrarForm] = useState({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+  const [registrarForm, setRegistrarForm] = useState({
+    name: '', code: '', description: '', api_endpoint: '', is_enabled: true,
+  });
 
   // ========== DNS 服务商 CRUD 模态框 ==========
   const [showDnsProviderModal, setShowDnsProviderModal] = useState(false);
   const [editingDnsProvider, setEditingDnsProvider] = useState<DnsProviderInfo | null>(null);
-  const [dnsProviderForm, setDnsProviderForm] = useState({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+  const [dnsProviderForm, setDnsProviderForm] = useState({
+    name: '', code: '', description: '', api_endpoint: '', is_enabled: true,
+  });
 
-  useEffect(() => {
-    fetchConfigInfo();
-  }, []);
+  // ==================== 初始化 ====================
+
+  useEffect(() => { fetchConfigInfo(); }, []);
 
   useEffect(() => {
     if (activeTab === 'reg-accounts') loadRegAccounts();
     if (activeTab === 'dns-accounts') loadDnsAccounts();
     if (activeTab === 'defaults') {
       loadDefaults();
-      // defaults 页需要账号列表填充下拉
       loadRegAccounts();
       loadDnsAccounts();
     }
@@ -146,6 +187,24 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     }
   };
 
+  /** 加载 domain_spec + super_admin 用户列表，供"归属专员"下拉使用 */
+  const loadSpecialists = async () => {
+    if (!isSuperAdmin || specialists.length > 0) return;
+    try {
+      const [specRes, superRes] = await Promise.all([
+        api.get('/users?role=domain_spec&limit=200'),
+        api.get('/users?role=super_admin&limit=20'),
+      ]);
+      const items = [
+        ...(specRes.data?.items || []),
+        ...(superRes.data?.items || []),
+      ];
+      setSpecialists(items.map((u: any) => ({ id: u.id, name: u.name, role: u.role })));
+    } catch (err) {
+      console.error('获取专员列表失败:', err);
+    }
+  };
+
   // ==================== 注册账号 CRUD ====================
 
   const loadRegAccounts = async () => {
@@ -160,7 +219,8 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     }
   };
 
-  const openRegModal = (account?: RegAccount) => {
+  const openRegModal = async (account?: RegAccount) => {
+    if (isSuperAdmin) await loadSpecialists();
     if (account) {
       setEditingRegAccount(account);
       setRegForm({
@@ -169,10 +229,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
         api_key: '',
         api_secret: '',
         remark: account.remark || '',
+        target_owner_id: account.owner_id ?? '',
       });
     } else {
       setEditingRegAccount(null);
-      setRegForm({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '' });
+      setRegForm({
+        name: '', registrar_code: '', api_key: '', api_secret: '', remark: '',
+        target_owner_id: isSuperAdmin ? currentUser.id : '',
+      });
     }
     setShowRegModal(true);
   };
@@ -180,7 +244,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const closeRegModal = () => {
     setShowRegModal(false);
     setEditingRegAccount(null);
-    setRegForm({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '' });
+    setRegForm({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '', target_owner_id: '' });
   };
 
   const handleRegSave = async () => {
@@ -189,41 +253,44 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
       return;
     }
     try {
+      let res;
       if (editingRegAccount) {
-        await api.put(`/domains/accounts/reg/${editingRegAccount.id}`, {
+        res = await api.put(`/domains/accounts/reg/${editingRegAccount.id}`, {
           name: regForm.name,
           api_key: regForm.api_key || undefined,
           api_secret: regForm.api_secret || undefined,
           remark: regForm.remark || undefined,
         });
-        alert('更新成功');
       } else {
-        await api.post('/domains/accounts/reg', {
+        const body: Record<string, any> = {
           name: regForm.name,
           registrar_code: regForm.registrar_code,
           api_key: regForm.api_key || undefined,
           api_secret: regForm.api_secret || undefined,
           remark: regForm.remark || undefined,
-        });
-        alert('创建成功');
+        };
+        if (isSuperAdmin && regForm.target_owner_id) {
+          body.target_owner_id = Number(regForm.target_owner_id);
+        }
+        res = await api.post('/domains/accounts/reg', body);
       }
+      // 后端始终返回 pending_approval
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
       closeRegModal();
       loadRegAccounts();
     } catch (err: any) {
-      console.error('保存注册账号失败:', err);
-      alert('保存失败: ' + (err.response?.data?.detail || err.message));
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   const handleRegDelete = async (account: RegAccount) => {
-    if (!confirm(`确定要删除注册账号 "${account.name}" 吗？`)) return;
+    if (!confirm(`确定要删除注册账号「${account.name}」吗？此操作需超管飞书确认。`)) return;
     try {
-      await api.delete(`/domains/accounts/reg/${account.id}`);
-      alert('删除成功');
+      const res = await api.delete(`/domains/accounts/reg/${account.id}`);
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
       loadRegAccounts();
     } catch (err: any) {
-      console.error('删除注册账号失败:', err);
-      alert('删除失败: ' + (err.response?.data?.detail || err.message));
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -241,7 +308,8 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     }
   };
 
-  const openDnsModal = (account?: DnsAccount) => {
+  const openDnsModal = async (account?: DnsAccount) => {
+    if (isSuperAdmin) await loadSpecialists();
     if (account) {
       setEditingDnsAccount(account);
       setDnsForm({
@@ -250,10 +318,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
         api_key: '',
         api_secret: '',
         remark: account.remark || '',
+        target_owner_id: account.owner_id ?? '',
       });
     } else {
       setEditingDnsAccount(null);
-      setDnsForm({ name: '', provider_code: '', api_key: '', api_secret: '', remark: '' });
+      setDnsForm({
+        name: '', provider_code: '', api_key: '', api_secret: '', remark: '',
+        target_owner_id: isSuperAdmin ? currentUser.id : '',
+      });
     }
     setShowDnsModal(true);
   };
@@ -261,7 +333,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const closeDnsModal = () => {
     setShowDnsModal(false);
     setEditingDnsAccount(null);
-    setDnsForm({ name: '', provider_code: '', api_key: '', api_secret: '', remark: '' });
+    setDnsForm({ name: '', provider_code: '', api_key: '', api_secret: '', remark: '', target_owner_id: '' });
   };
 
   const handleDnsSave = async () => {
@@ -270,41 +342,43 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
       return;
     }
     try {
+      let res;
       if (editingDnsAccount) {
-        await api.put(`/domains/accounts/dns/${editingDnsAccount.id}`, {
+        res = await api.put(`/domains/accounts/dns/${editingDnsAccount.id}`, {
           name: dnsForm.name,
           api_key: dnsForm.api_key || undefined,
           api_secret: dnsForm.api_secret || undefined,
           remark: dnsForm.remark || undefined,
         });
-        alert('更新成功');
       } else {
-        await api.post('/domains/accounts/dns', {
+        const body: Record<string, any> = {
           name: dnsForm.name,
           provider_code: dnsForm.provider_code,
           api_key: dnsForm.api_key || undefined,
           api_secret: dnsForm.api_secret || undefined,
           remark: dnsForm.remark || undefined,
-        });
-        alert('创建成功');
+        };
+        if (isSuperAdmin && dnsForm.target_owner_id) {
+          body.target_owner_id = Number(dnsForm.target_owner_id);
+        }
+        res = await api.post('/domains/accounts/dns', body);
       }
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
       closeDnsModal();
       loadDnsAccounts();
     } catch (err: any) {
-      console.error('保存DNS账号失败:', err);
-      alert('保存失败: ' + (err.response?.data?.detail || err.message));
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
   const handleDnsDelete = async (account: DnsAccount) => {
-    if (!confirm(`确定要删除DNS账号 "${account.name}" 吗？`)) return;
+    if (!confirm(`确定要删除DNS账号「${account.name}」吗？此操作需超管飞书确认。`)) return;
     try {
-      await api.delete(`/domains/accounts/dns/${account.id}`);
-      alert('删除成功');
+      const res = await api.delete(`/domains/accounts/dns/${account.id}`);
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
       loadDnsAccounts();
     } catch (err: any) {
-      console.error('删除DNS账号失败:', err);
-      alert('删除失败: ' + (err.response?.data?.detail || err.message));
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -325,10 +399,8 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const handleSaveDefaults = async () => {
     try {
       const res = await api.put('/config/defaults', defaultConfig);
-      // 后端走飞书确认流程，返回 pending_approval
       alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
     } catch (err: any) {
-      console.error('保存默认配置失败:', err);
       alert('保存失败: ' + (err.response?.data?.detail || err.message));
     }
   };
@@ -449,15 +521,12 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
 
   // ==================== 渲染工具 ====================
 
-  const findRegistrarName = (code: string) => {
-    const reg = registrars.find((r) => r.code === code);
-    return reg ? reg.name : code;
-  };
+  const findRegistrarName = (code: string) => registrars.find((r) => r.code === code)?.name ?? code;
+  const findDnsProviderName = (code: string) => dnsProviders.find((d) => d.code === code)?.name ?? code;
 
-  const findDnsProviderName = (code: string) => {
-    const p = dnsProviders.find((d) => d.code === code);
-    return p ? p.name : code;
-  };
+  /** 判断当前用户是否可对某账号执行写操作（编辑/删除） */
+  const canEditAccount = (ownerId: number | null) =>
+    isSuperAdmin || ownerId === currentUser.id;
 
   if (loading) {
     return (
@@ -467,42 +536,69 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     );
   }
 
+  // ==================== "归属专员"下拉（super_admin 新建账号时用） ====================
+  const OwnerSelect = ({
+    value,
+    onChange,
+  }: {
+    value: string | number;
+    onChange: (v: string | number) => void;
+  }) => (
+    <div>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
+        归属专员 <span className="text-red-500">*</span>
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full border border-gray-300 rounded-lg px-3 py-2"
+      >
+        <option value="">请选择归属专员</option>
+        {specialists.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name}（{s.role === 'super_admin' ? '超管' : '域名专员'}）
+            {s.id === currentUser.id ? ' ← 自己' : ''}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+
+  // ==================== 渲染 ====================
+
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-800">{title}</h1>
 
       <div className="bg-white rounded-lg shadow">
-        {/* Tab 导航（仅在有多个分区时显示） */}
         {TABS.length > 1 && (
-        <div className="border-b border-gray-200">
-          <nav className="flex overflow-x-auto px-6 scrollbar-none">
-            {TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`py-4 px-3 border-b-2 font-medium text-sm whitespace-nowrap flex-shrink-0 ${
-                  activeTab === tab.key
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
+          <div className="border-b border-gray-200">
+            <nav className="flex overflow-x-auto px-6 scrollbar-none">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`py-4 px-3 border-b-2 font-medium text-sm whitespace-nowrap flex-shrink-0 ${
+                    activeTab === tab.key
+                      ? 'border-blue-500 text-blue-600'
+                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+          </div>
         )}
 
         <div className="p-6">
+
           {/* ==================== 注册商配置 ==================== */}
           {activeTab === 'registrar' && (
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-semibold">注册商管理</h2>
-                <button
-                  onClick={() => openRegistrarModal()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
+                <button onClick={() => openRegistrarModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                   新增注册商
                 </button>
               </div>
@@ -534,7 +630,6 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 </div>
               )}
 
-              {/* 注册商弹窗 */}
               {showRegistrarModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                   <div className="bg-white rounded-lg w-full max-w-lg">
@@ -579,15 +674,12 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
             </div>
           )}
 
-          {/* ==================== DNS配置 ==================== */}
+          {/* ==================== DNS 服务商配置 ==================== */}
           {activeTab === 'dns' && (
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-semibold">DNS 服务商管理</h2>
-                <button
-                  onClick={() => openDnsProviderModal()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
+                <button onClick={() => openDnsProviderModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                   新增 DNS 服务商
                 </button>
               </div>
@@ -619,7 +711,6 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 </div>
               )}
 
-              {/* DNS 服务商弹窗 */}
               {showDnsProviderModal && (
                 <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
                   <div className="bg-white rounded-lg w-full max-w-lg">
@@ -669,13 +760,15 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-semibold">注册账号管理</h2>
-                <button
-                  onClick={() => openRegModal()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
+                <button onClick={() => openRegModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                   新增账号
                 </button>
               </div>
+              <p className="text-sm text-gray-500">
+                {isSuperAdmin
+                  ? '超管可查看并管理所有专员的账号，新建时需指定归属专员。'
+                  : '仅显示归属于您的账号，新增/编辑/删除均需超管飞书确认。'}
+              </p>
 
               {regAccountsLoading ? (
                 <div className="text-center py-12 text-gray-500">加载中...</div>
@@ -688,12 +781,15 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">账号名称</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">注册商</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">备注</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">注册商</th>
+                          {isSuperAdmin && (
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">归属专员</th>
+                          )}
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">备注</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -701,6 +797,11 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <tr key={account.id} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{account.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{findRegistrarName(account.registrar_code)}</td>
+                            {isSuperAdmin && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {account.owner_name ?? <span className="text-gray-400 italic">未指定</span>}
+                              </td>
+                            )}
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${account.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                 {account.is_active ? '启用' : '禁用'}
@@ -709,8 +810,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button onClick={() => openRegModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
-                              <button onClick={() => handleRegDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
+                              {canEditAccount(account.owner_id) ? (
+                                <>
+                                  <button onClick={() => openRegModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
+                                  <button onClick={() => handleRegDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
+                                </>
+                              ) : (
+                                <span className="text-gray-300 text-xs">无权操作</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -726,16 +833,21 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <div>
                             <h3 className="font-medium text-gray-900">{account.name}</h3>
                             <p className="text-sm text-gray-500 mt-1">{findRegistrarName(account.registrar_code)}</p>
+                            {isSuperAdmin && account.owner_name && (
+                              <p className="text-xs text-gray-400 mt-1">归属：{account.owner_name}</p>
+                            )}
                           </div>
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${account.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {account.is_active ? '启用' : '禁用'}
                           </span>
                         </div>
                         {account.remark && <p className="text-sm text-gray-400 mt-2">{account.remark}</p>}
-                        <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
-                          <button onClick={() => openRegModal(account)} className="text-blue-600 text-sm">编辑</button>
-                          <button onClick={() => handleRegDelete(account)} className="text-red-600 text-sm">删除</button>
-                        </div>
+                        {canEditAccount(account.owner_id) && (
+                          <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
+                            <button onClick={() => openRegModal(account)} className="text-blue-600 text-sm">编辑</button>
+                            <button onClick={() => handleRegDelete(account)} className="text-red-600 text-sm">删除</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -753,64 +865,65 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                       <button onClick={closeRegModal} className="text-gray-400 hover:text-gray-600">关闭</button>
                     </div>
                     <div className="p-6 space-y-4">
+                      {/* super_admin 新建时选择归属专员 */}
+                      {isSuperAdmin && !editingRegAccount && (
+                        <OwnerSelect
+                          value={regForm.target_owner_id}
+                          onChange={(v) => setRegForm({ ...regForm, target_owner_id: v })}
+                        />
+                      )}
+                      {/* super_admin 编辑时只读展示归属专员 */}
+                      {isSuperAdmin && editingRegAccount && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">归属专员</label>
+                          <p className="text-sm text-gray-600 px-3 py-2 bg-gray-50 rounded-lg">
+                            {editingRegAccount.owner_name ?? '未指定'}
+                          </p>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">账号名称 <span className="text-red-500">*</span></label>
-                        <input
-                          type="text"
-                          value={regForm.name}
+                        <input type="text" value={regForm.name}
                           onChange={(e) => setRegForm({ ...regForm, name: e.target.value })}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder="请输入账号名称"
-                        />
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="请输入账号名称" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">注册商 <span className="text-red-500">*</span></label>
-                        <select
-                          value={regForm.registrar_code}
+                        <select value={regForm.registrar_code}
                           onChange={(e) => setRegForm({ ...regForm, registrar_code: e.target.value })}
                           disabled={!!editingRegAccount}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
-                        >
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
                           <option value="">请选择注册商</option>
-                          {registrars.map((r) => (
-                            <option key={r.code} value={r.code}>{r.name}</option>
-                          ))}
+                          {registrars.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                        <input
-                          type="password"
-                          value={regForm.api_key}
+                        <input type="password" value={regForm.api_key}
                           onChange={(e) => setRegForm({ ...regForm, api_key: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入API Key'}
-                        />
+                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入 API Key'} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
-                        <input
-                          type="password"
-                          value={regForm.api_secret}
+                        <input type="password" value={regForm.api_secret}
                           onChange={(e) => setRegForm({ ...regForm, api_secret: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入API Secret'}
-                        />
+                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入 API Secret'} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
-                        <textarea
-                          value={regForm.remark}
+                        <textarea value={regForm.remark}
                           onChange={(e) => setRegForm({ ...regForm, remark: e.target.value })}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          rows={2}
-                          placeholder="请输入备注"
-                        />
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" rows={2} />
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-700">
+                        提交后将发送飞书确认给超级管理员，审批通过后生效。
                       </div>
                     </div>
                     <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
                       <button onClick={closeRegModal} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg">取消</button>
-                      <button onClick={handleRegSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">保存</button>
+                      <button onClick={handleRegSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">提交申请</button>
                     </div>
                   </div>
                 </div>
@@ -823,13 +936,15 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
             <div className="space-y-6">
               <div className="flex justify-between items-center">
                 <h2 className="text-lg font-semibold">DNS账号管理</h2>
-                <button
-                  onClick={() => openDnsModal()}
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
+                <button onClick={() => openDnsModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
                   新增账号
                 </button>
               </div>
+              <p className="text-sm text-gray-500">
+                {isSuperAdmin
+                  ? '超管可查看并管理所有专员的账号，新建时需指定归属专员。'
+                  : '仅显示归属于您的账号，新增/编辑/删除均需超管飞书确认。'}
+              </p>
 
               {dnsAccountsLoading ? (
                 <div className="text-center py-12 text-gray-500">加载中...</div>
@@ -842,12 +957,15 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                     <table className="min-w-full divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">账号名称</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">DNS服务商</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">备注</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">创建时间</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">DNS服务商</th>
+                          {isSuperAdmin && (
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">归属专员</th>
+                          )}
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">备注</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
+                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -855,6 +973,11 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <tr key={account.id} className="hover:bg-gray-50">
                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{account.name}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{findDnsProviderName(account.provider_code)}</td>
+                            {isSuperAdmin && (
+                              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {account.owner_name ?? <span className="text-gray-400 italic">未指定</span>}
+                              </td>
+                            )}
                             <td className="px-6 py-4 whitespace-nowrap">
                               <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${account.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                                 {account.is_active ? '启用' : '禁用'}
@@ -863,8 +986,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                              <button onClick={() => openDnsModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
-                              <button onClick={() => handleDnsDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
+                              {canEditAccount(account.owner_id) ? (
+                                <>
+                                  <button onClick={() => openDnsModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
+                                  <button onClick={() => handleDnsDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
+                                </>
+                              ) : (
+                                <span className="text-gray-300 text-xs">无权操作</span>
+                              )}
                             </td>
                           </tr>
                         ))}
@@ -880,16 +1009,21 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <div>
                             <h3 className="font-medium text-gray-900">{account.name}</h3>
                             <p className="text-sm text-gray-500 mt-1">{findDnsProviderName(account.provider_code)}</p>
+                            {isSuperAdmin && account.owner_name && (
+                              <p className="text-xs text-gray-400 mt-1">归属：{account.owner_name}</p>
+                            )}
                           </div>
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${account.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                             {account.is_active ? '启用' : '禁用'}
                           </span>
                         </div>
                         {account.remark && <p className="text-sm text-gray-400 mt-2">{account.remark}</p>}
-                        <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
-                          <button onClick={() => openDnsModal(account)} className="text-blue-600 text-sm">编辑</button>
-                          <button onClick={() => handleDnsDelete(account)} className="text-red-600 text-sm">删除</button>
-                        </div>
+                        {canEditAccount(account.owner_id) && (
+                          <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
+                            <button onClick={() => openDnsModal(account)} className="text-blue-600 text-sm">编辑</button>
+                            <button onClick={() => handleDnsDelete(account)} className="text-red-600 text-sm">删除</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -907,64 +1041,63 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                       <button onClick={closeDnsModal} className="text-gray-400 hover:text-gray-600">关闭</button>
                     </div>
                     <div className="p-6 space-y-4">
+                      {isSuperAdmin && !editingDnsAccount && (
+                        <OwnerSelect
+                          value={dnsForm.target_owner_id}
+                          onChange={(v) => setDnsForm({ ...dnsForm, target_owner_id: v })}
+                        />
+                      )}
+                      {isSuperAdmin && editingDnsAccount && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">归属专员</label>
+                          <p className="text-sm text-gray-600 px-3 py-2 bg-gray-50 rounded-lg">
+                            {editingDnsAccount.owner_name ?? '未指定'}
+                          </p>
+                        </div>
+                      )}
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">账号名称 <span className="text-red-500">*</span></label>
-                        <input
-                          type="text"
-                          value={dnsForm.name}
+                        <input type="text" value={dnsForm.name}
                           onChange={(e) => setDnsForm({ ...dnsForm, name: e.target.value })}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder="请输入账号名称"
-                        />
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="请输入账号名称" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">DNS服务商 <span className="text-red-500">*</span></label>
-                        <select
-                          value={dnsForm.provider_code}
+                        <select value={dnsForm.provider_code}
                           onChange={(e) => setDnsForm({ ...dnsForm, provider_code: e.target.value })}
                           disabled={!!editingDnsAccount}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
-                        >
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100">
                           <option value="">请选择DNS服务商</option>
-                          {dnsProviders.map((p) => (
-                            <option key={p.code} value={p.code}>{p.name}</option>
-                          ))}
+                          {dnsProviders.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                        <input
-                          type="password"
-                          value={dnsForm.api_key}
+                        <input type="password" value={dnsForm.api_key}
                           onChange={(e) => setDnsForm({ ...dnsForm, api_key: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入API Key'}
-                        />
+                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入 API Key'} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
-                        <input
-                          type="password"
-                          value={dnsForm.api_secret}
+                        <input type="password" value={dnsForm.api_secret}
                           onChange={(e) => setDnsForm({ ...dnsForm, api_secret: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入API Secret'}
-                        />
+                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入 API Secret'} />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>
-                        <textarea
-                          value={dnsForm.remark}
+                        <textarea value={dnsForm.remark}
                           onChange={(e) => setDnsForm({ ...dnsForm, remark: e.target.value })}
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          rows={2}
-                          placeholder="请输入备注"
-                        />
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" rows={2} />
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-700">
+                        提交后将发送飞书确认给超级管理员，审批通过后生效。
                       </div>
                     </div>
                     <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
                       <button onClick={closeDnsModal} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg">取消</button>
-                      <button onClick={handleDnsSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">保存</button>
+                      <button onClick={handleDnsSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">提交申请</button>
                     </div>
                   </div>
                 </div>
@@ -982,61 +1115,50 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 <div className="max-w-xl space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认注册商</label>
-                    <select
-                      value={defaultConfig.default_registrar}
+                    <select value={defaultConfig.default_registrar}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_registrar: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
                       <option value="">请选择</option>
-                      {registrars.map((r) => (
-                        <option key={r.code} value={r.code}>{r.name}</option>
-                      ))}
+                      {registrars.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS服务商</label>
-                    <select
-                      value={defaultConfig.default_dns_provider}
+                    <select value={defaultConfig.default_dns_provider}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_dns_provider: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
                       <option value="">请选择</option>
-                      {dnsProviders.map((p) => (
-                        <option key={p.code} value={p.code}>{p.name}</option>
-                      ))}
+                      {dnsProviders.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认注册账号</label>
-                    <select
-                      value={defaultConfig.default_reg_account_id ?? ''}
+                    <select value={defaultConfig.default_reg_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_reg_account_id: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
                       <option value="">不指定（可选）</option>
                       {regAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}（{findRegistrarName(a.registrar_code)}）</option>
+                        <option key={a.id} value={a.id}>
+                          {a.name}（{findRegistrarName(a.registrar_code)}）{isSuperAdmin && a.owner_name ? ` — ${a.owner_name}` : ''}
+                        </option>
                       ))}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS账号</label>
-                    <select
-                      value={defaultConfig.default_dns_account_id ?? ''}
+                    <select value={defaultConfig.default_dns_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_dns_account_id: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                    >
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
                       <option value="">不指定（可选）</option>
                       {dnsAccounts.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}（{findDnsProviderName(a.provider_code)}）</option>
+                        <option key={a.id} value={a.id}>
+                          {a.name}（{findDnsProviderName(a.provider_code)}）{isSuperAdmin && a.owner_name ? ` — ${a.owner_name}` : ''}
+                        </option>
                       ))}
                     </select>
                   </div>
                   <div className="pt-4">
-                    <button
-                      onClick={handleSaveDefaults}
-                      className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                    >
+                    <button onClick={handleSaveDefaults} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                       提交申请
                     </button>
                   </div>
@@ -1050,6 +1172,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
 
           {/* ==================== 用户管理 ==================== */}
           {activeTab === 'users' && <UserManagement />}
+
         </div>
       </div>
     </div>
