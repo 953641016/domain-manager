@@ -470,8 +470,16 @@ class UserOperationConfirmationService:
             user_svc.create_user(data)
 
         elif action == "update_user":
-            data = UserUpdate(**details.get("changes", {}))
-            user_svc.update_user(details["user_id"], data)
+            # 超管转让：先提升新超管，再降级原超管（两步原子写入，绝不出现双超管超过一个事务）
+            if details.get("transfer_super_admin") and details.get("changes", {}).get("role") == "super_admin":
+                data = UserUpdate(**details.get("changes", {}))
+                user_svc.update_user(details["user_id"], data)
+                old_sa_id = details.get("old_super_admin_id")
+                if old_sa_id:
+                    user_svc.update_user(old_sa_id, UserUpdate(role="admin"))
+            else:
+                data = UserUpdate(**details.get("changes", {}))
+                user_svc.update_user(details["user_id"], data)
 
         elif action == "deactivate_user":
             # 软禁用：is_active=False，可通过 activate 恢复
@@ -611,32 +619,51 @@ class UserOperationConfirmationService:
                 "activate_user":   "  ·  重新激活",
             }.get(action, "")
             op_target = f"{name}（{role}）{note}"
-            # 变更明细（仅 update_user）
-            changes = details.get("changes", {})
-            if changes and action == "update_user":
-                change_parts = []
-                for k, v in changes.items():
-                    if v is None or v == "":
-                        continue
-                    label = _USER_FIELD_LABELS.get(k, k)
-                    if k == "role":
-                        display_v = self._role_name(v)
-                    elif k == "is_active":
-                        display_v = "启用" if v else "禁用"
-                    else:
-                        display_v = str(v)
-                    change_parts.append(f"· {label} → {display_v}")
-                if change_parts:
-                    change_elements = [
-                        {"tag": "hr"},
-                        {
-                            "tag": "div",
-                            "text": {
-                                "tag": "lark_md",
-                                "content": "**变更内容**：\n" + "\n".join(change_parts),
-                            },
+
+            # 超管转让：专属变更块（优先级高于普通 update_user 逻辑）
+            if action == "update_user" and details.get("transfer_super_admin"):
+                old_sa_name = details.get("old_super_admin_name", "—")
+                change_elements = [
+                    {"tag": "hr"},
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": (
+                                f"**变更内容**：\n"
+                                f"· 超管转让：{old_sa_name} → {name}\n"
+                                f"· {old_sa_name} 将自动降为系统管理员"
+                            ),
                         },
-                    ]
+                    },
+                ]
+            else:
+                # 变更明细（普通 update_user）
+                changes = details.get("changes", {})
+                if changes and action == "update_user":
+                    change_parts = []
+                    for k, v in changes.items():
+                        if v is None or v == "":
+                            continue
+                        label = _USER_FIELD_LABELS.get(k, k)
+                        if k == "role":
+                            display_v = self._role_name(v)
+                        elif k == "is_active":
+                            display_v = "启用" if v else "禁用"
+                        else:
+                            display_v = str(v)
+                        change_parts.append(f"· {label} → {display_v}")
+                    if change_parts:
+                        change_elements = [
+                            {"tag": "hr"},
+                            {
+                                "tag": "div",
+                                "text": {
+                                    "tag": "lark_md",
+                                    "content": "**变更内容**：\n" + "\n".join(change_parts),
+                                },
+                            },
+                        ]
         else:
             acc_name = details.get("data", {}).get("name") or details.get("account_name", "")
             op_target = acc_name or "—"
@@ -658,8 +685,10 @@ class UserOperationConfirmationService:
         if api_key_masked:
             main_lines.append(f"**API Key**：`{api_key_masked}`")
 
-        # 卡片标题 & 颜色（不可逆操作用红色）
-        if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
+        # 卡片标题 & 颜色（不可逆或高风险操作用红色）
+        if details.get("transfer_super_admin"):
+            card_title = "👑 超管转让授权申请"
+        elif action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
             card_title = "👤 用户管理授权申请"
         elif op_type in ("add_provider", "update_provider", "delete_provider"):
             card_title = "🏷️ 服务商配置授权申请"
@@ -667,7 +696,8 @@ class UserOperationConfirmationService:
             card_title = "🔐 账号配置授权申请"
 
         _danger_actions = {"delete_user", "delete_reg_account", "delete_dns_account", "delete_provider"}
-        card_color = "red" if action in _danger_actions else "orange"
+        # 超管转让属于高敏感操作，同样用红色
+        card_color = "red" if (action in _danger_actions or details.get("transfer_super_admin")) else "orange"
 
         elements: list = [
             {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(main_lines)}},

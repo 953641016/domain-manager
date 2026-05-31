@@ -149,23 +149,40 @@ def update_user(
     target = service.get_user(user_id)
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+
+    details: dict = {
+        "action": "update_user",
+        "user_id": user_id,
+        "target_name": target.name,
+        "target_role": target.role,
+        "changes": user_in.model_dump(exclude_none=True),
+    }
+
+    # 超管转让检测：将某人提升为 super_admin 且对方当前不是超管
+    # → 原子操作：提升新超管 + 降级原超管为系统管理员
+    if user_in.role == "super_admin" and target.role != "super_admin":
+        from app.services.user_confirmation_service import UserOperationConfirmationService
+        current_sa = UserOperationConfirmationService(db).get_super_admin()
+        if current_sa and current_sa.id != user_id:
+            details["transfer_super_admin"] = True
+            details["old_super_admin_id"] = current_sa.id
+            details["old_super_admin_name"] = current_sa.name
+
     return _user_confirmation(
         db, current_user,
         ConfirmationOperationType.UPDATE_USER_ROLE
         if user_in.role else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
-        details={
-            "action": "update_user",
-            "user_id": user_id,
-            "target_name": target.name,
-            "changes": user_in.model_dump(exclude_none=True),
-        },
+        details=details,
     )
 
 
 def _check_disable_delete_permission(current_user: User, target: User):
     """禁用/删除前的通用权限检查"""
     if target.role == "super_admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="超级管理员账号不能被禁用或删除")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="超级管理员不能直接禁用或删除。如需更换超管，请将目标用户的角色改为「超级管理员」，系统将自动转让并将原超管降为系统管理员。",
+        )
     if current_user.id == target.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能禁用或删除自己的账号")
 
