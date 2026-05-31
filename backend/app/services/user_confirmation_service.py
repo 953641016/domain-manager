@@ -386,7 +386,7 @@ class UserOperationConfirmationService:
         details = confirmation.operation_details or {}
 
         # 用户增改删：以 details["action"] 为准（operation_type 仅用于卡片归类）
-        if details.get("action") in ("create_user", "update_user", "delete_user", "activate_user"):
+        if details.get("action") in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
             self._execute_user_op(details)
             return
 
@@ -461,8 +461,13 @@ class UserOperationConfirmationService:
             data = UserUpdate(**details.get("changes", {}))
             user_svc.update_user(details["user_id"], data)
 
-        elif action == "delete_user":
+        elif action == "deactivate_user":
+            # 软禁用：is_active=False，可通过 activate 恢复
             user_svc.delete_user(details["user_id"])
+
+        elif action == "delete_user":
+            # 硬删除：从数据库中移除用户记录
+            user_svc.hard_delete_user(details["user_id"])
 
         elif action == "activate_user":
             user_svc.activate_user(details["user_id"])
@@ -635,10 +640,16 @@ class UserOperationConfirmationService:
             summary = "；".join(parts) if parts else "（无可显示字段）"
             return f"{prefix}更新用户：{details.get('target_name')} - {summary}"
 
+        if action == "deactivate_user":
+            return (
+                f"{prefix}禁用用户：{details.get('target_name')}"
+                f"（{self._role_name(details.get('target_role'))}，禁用后可恢复）"
+            )
+
         if action == "delete_user":
             return (
-                f"{prefix}删除/禁用用户：{details.get('target_name')}"
-                f"（{self._role_name(details.get('target_role'))}）"
+                f"{prefix}删除用户：{details.get('target_name')}"
+                f"（{self._role_name(details.get('target_role'))}，⚠️ 硬删除不可恢复）"
             )
 
         if action == "activate_user":
@@ -658,7 +669,7 @@ class UserOperationConfirmationService:
 
         # 用户增改删：统一以 details["action"] 渲染（目标信息存于 operation_details）
         action = (details or {}).get("action")
-        if action in ("create_user", "update_user", "delete_user", "activate_user"):
+        if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
             return self._format_user_op(prefix, action, details)
 
         if op_type == ConfirmationOperationType.ADD_DOMAIN_SPEC:

@@ -58,16 +58,25 @@ export async function updateUser(id: number, data: UserUpdate): Promise<User> {
 }
 
 /**
- * 删除用户
+ * 禁用用户（软禁用，可恢复）
  */
-export async function deleteUser(id: number): Promise<void> {
-  await api.delete(`/users/${id}`);
+export async function deactivateUser(id: number): Promise<any> {
+  const response = await api.post(`/users/${id}/deactivate`);
+  return response.data;
+}
+
+/**
+ * 删除用户（硬删除，不可恢复）
+ */
+export async function deleteUser(id: number): Promise<any> {
+  const response = await api.delete(`/users/${id}`);
+  return response.data;
 }
 
 /**
  * 激活用户
  */
-export async function activateUser(id: number): Promise<User> {
-  const response = await api.post<User>(`/users/${id}/activate`);
+export async function activateUser(id: number): Promise<any> {
+  const response = await api.post(`/users/${id}/activate`);
   return response.data;
 }

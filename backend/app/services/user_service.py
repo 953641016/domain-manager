@@ -199,6 +199,19 @@ class UserService:
 
         return True
 
+    def hard_delete_user(self, user_id: int) -> bool:
+        """硬删除：从数据库中彻底移除用户（外键关联字段置 NULL，审计/申请记录保留）"""
+        from sqlalchemy import text
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        # 解除外键引用，避免约束报错
+        self.db.execute(text("UPDATE requests SET approver_id=NULL WHERE approver_id=:uid"), {"uid": user_id})
+        self.db.execute(text("UPDATE users SET assigned_specialist_id=NULL WHERE assigned_specialist_id=:uid"), {"uid": user_id})
+        self.db.delete(user)
+        self.db.commit()
+        return True
+
     def activate_user(self, user_id: int) -> Optional[User]:
         """
         激活用户

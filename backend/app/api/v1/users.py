@@ -162,21 +162,57 @@ def update_user(
     )
 
 
+def _check_disable_delete_permission(current_user: User, target: User):
+    """禁用/删除前的通用权限检查"""
+    if target.role == "super_admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="超级管理员账号不能被禁用或删除")
+    if current_user.id == target.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="不能禁用或删除自己的账号")
+
+
+@router.post("/{user_id}/deactivate")
+def deactivate_user(
+    user_id: int,
+    current_user: User = Depends(require_manage_users),
+    db: Session = Depends(get_db),
+):
+    """禁用用户（is_active=False，可恢复；需超管飞书确认）"""
+    service = UserService(db)
+    target = service.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    if not target.is_active:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="用户已处于禁用状态")
+    _check_disable_delete_permission(current_user, target)
+    return _user_confirmation(
+        db, current_user,
+        ConfirmationOperationType.REMOVE_ADMIN
+        if target.role in ("admin",) else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
+        details={
+            "action": "deactivate_user",
+            "user_id": user_id,
+            "target_name": target.name,
+            "target_role": target.role,
+        },
+    )
+
+
 @router.delete("/{user_id}")
 def delete_user(
     user_id: int,
     current_user: User = Depends(require_manage_users),
     db: Session = Depends(get_db),
 ):
-    """删除/禁用用户（需超管飞书确认）"""
+    """删除用户（硬删除，不可恢复；需超管飞书确认）"""
     service = UserService(db)
     target = service.get_user(user_id)
     if not target:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    _check_disable_delete_permission(current_user, target)
     return _user_confirmation(
         db, current_user,
         ConfirmationOperationType.REMOVE_ADMIN
-        if target.role in ("admin", "super_admin") else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
+        if target.role in ("admin",) else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
         details={
             "action": "delete_user",
             "user_id": user_id,

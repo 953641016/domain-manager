@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { api } from '@/api/client';
 import {
-  getUsers, getRoles, createUser, updateUser, deleteUser, activateUser
+  getUsers, getRoles, createUser, updateUser, deactivateUser, deleteUser, activateUser
 } from '@/api/users';
 import { searchFeishuUsers } from '@/api/feishu';
 import type { FeishuUserInfo } from '@/api/feishu';
@@ -144,14 +144,29 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const handleDeactivate = async (user: User) => {
+    if (!confirm('确定要禁用用户 "' + user.name + '" 吗？禁用后可通过激活恢复。')) return;
+    try {
+      const result: any = await deactivateUser(user.id);
+      if (result?.status === 'pending_approval') {
+        alert('已提交申请，等待超级管理员飞书确认后生效。');
+      } else {
+        alert('已禁用');
+        loadUsers();
+      }
+    } catch (error: any) {
+      alert('操作失败: ' + (error.response?.data?.detail || error.message));
+    }
+  };
+
   const handleDelete = async (user: User) => {
-    if (!confirm('确定要禁用用户 "' + user.name + '" 吗？')) return;
+    if (!confirm('⚠️ 确定要删除用户 "' + user.name + '" 吗？\n\n删除后不可恢复，请谨慎操作。')) return;
     try {
       const result: any = await deleteUser(user.id);
       if (result?.status === 'pending_approval') {
         alert('已提交申请，等待超级管理员飞书确认后生效。');
       } else {
-        alert('已禁用');
+        alert('已删除');
         loadUsers();
       }
     } catch (error: any) {
@@ -363,10 +378,11 @@ const UserManagement: React.FC = () => {
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button onClick={() => openModal(user)} className="text-blue-600 hover:text-blue-900 mr-2">编辑</button>
                       {user.is_active ? (
-                        <button onClick={() => handleDelete(user)} className="text-red-600 hover:text-red-900">禁用</button>
+                        <button onClick={() => handleDeactivate(user)} className="text-orange-600 hover:text-orange-900 mr-2">禁用</button>
                       ) : (
-                        <button onClick={() => handleActivate(user)} className="text-green-600 hover:text-green-900">激活</button>
+                        <button onClick={() => handleActivate(user)} className="text-green-600 hover:text-green-900 mr-2">激活</button>
                       )}
+                      <button onClick={() => handleDelete(user)} className="text-red-600 hover:text-red-900">删除</button>
                     </td>
                   </tr>
                 ))
