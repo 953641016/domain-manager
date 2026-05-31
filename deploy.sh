@@ -10,7 +10,16 @@ set -e
 cd /opt/domain-manager
 
 echo "=== [1/4] 拉取最新代码 ==="
-git pull
+if ! git pull 2>&1; then
+    PROXY_FILE="$HOME/.git-proxy-url"
+    if [ -f "$PROXY_FILE" ]; then
+        echo "直连失败，通过代理重试..."
+        HTTPS_PROXY="$(cat "$PROXY_FILE")" git -c http.proxyAuthMethod=basic pull
+    else
+        echo "git pull 失败，且 $PROXY_FILE 不存在，退出"
+        exit 1
+    fi
+fi
 
 TARGET=${1:-all}
 
