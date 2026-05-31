@@ -12,6 +12,31 @@
 
 ---
 
+## [1.3.5] — 2026-06-01
+
+### 运维
+- **`deploy.sh` 代理回退机制**：`git pull` 直连失败时自动读取服务器 `/root/.git-proxy-url` 通过代理重试，解决国内服务器无法稳定访问 GitHub 的问题；代理仅对 git 生效，不修改系统全局网络配置
+
+### 文档
+- **交接文档审查修正**（`docs/项目交接文档.md`）：修正10处错误与遗漏
+  - `DEVELOPMENT.md`：环境变量名 `SECRET_KEY` 更正为 `JWT_SECRET_KEY`（错误变量名导致认证失败）
+  - `DEVELOPMENT.md`：为"直接在服务器改代码"方案加安全警告，说明其为生产操作
+  - 部署命令由旧式 `docker-compose` 统一更正为 V2 格式 `docker compose`
+  - 补入飞书 Webhook 安全字段 `FEISHU_VERIFICATION_TOKEN`、`FEISHU_ENCRYPT_KEY`（遗漏会导致验签失效）
+  - `CLOUDFLARE_API_TOKEN` 由"必填"更正为"可选"
+  - 补充首次部署超管初始化流程（`init_db.py` + `SUPER_ADMIN_FEISHU_USER_ID`）
+  - 补充 `manage_users.py` 无法创建 `super_admin` 的说明
+  - 二级目录部署文档路径修正至 `docs/archive/`
+  - `arch.md` 引用加历史文档免责说明；`docs/` 文件计数由 17 更正为 24；模型数由 9 更正为 10
+  - `arch.md` 顶部添加偏差速查表（API 前缀 `/api/...` 与实际 `/api/v1/...` 的差异、权限示例代码的错误）
+  - 联系方式由空占位符填入实际维护者（张立坤，飞书）
+
+### 清理
+- 删除 `backend/app/database.py`：项目初期遗留的旧版 SQLAlchemy 初始化文件，已全面迁移至 `app/core/database`，无任何引用
+- 删除 `services/workflow.py`：根目录下的旧版工作流引擎，仍使用早期废弃的 `from database import` 路径，无任何引用
+
+---
+
 ## [1.3.4] — 2026-05-31
 
 ### 安全/权限
