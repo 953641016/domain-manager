@@ -251,6 +251,55 @@ async def send_card(request: SendCardRequest):
         raise HTTPException(status_code=500, detail=f"发送卡片失败: {str(e)}")
 
 
+# ════════════════════════════════════════════════════════════
+# 移动端 HTML 模板工具
+# ════════════════════════════════════════════════════════════
+
+def _html_page(
+    title: str,
+    icon: str,
+    heading: str,
+    body: str,
+    auto_close_ms: int = 0,
+) -> str:
+    """
+    生成移动端友好的结果页 HTML。
+    所有扫码回调页统一使用此模板，确保在飞书 App 内置浏览器中正常显示。
+    """
+    close_script = (
+        f'<script>setTimeout(function(){{window.close();}},{auto_close_ms});</script>'
+        if auto_close_ms else ""
+    )
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title}</title>
+  <style>
+    *{{box-sizing:border-box;margin:0;padding:0}}
+    body{{font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;
+         background:#f5f6fa;display:flex;align-items:center;justify-content:center;
+         min-height:100vh;padding:24px 16px}}
+    .card{{background:#fff;border-radius:16px;padding:44px 28px 36px;
+           max-width:400px;width:100%;text-align:center;
+           box-shadow:0 4px 24px rgba(0,0,0,.09)}}
+    .icon{{font-size:52px;margin-bottom:18px;line-height:1}}
+    h2{{font-size:20px;font-weight:600;color:#1a1a1a;margin-bottom:14px}}
+    p{{font-size:15px;color:#666;line-height:1.75;margin-top:6px}}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">{icon}</div>
+    <h2>{heading}</h2>
+    {body}
+  </div>
+  {close_script}
+</body>
+</html>"""
+
+
 @router.get("/add-user-callback")
 async def add_user_callback(
     code: str = Query(..., description="飞书授权码"),
@@ -276,14 +325,13 @@ async def add_user_callback(
 
         existing_user = user_service.get_user_by_feishu_userid(feishu_user_id)
         if existing_user:
-            html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>用户已存在</title></head>
-<body style="text-align:center;padding:50px;font-family:sans-serif">
-<h2>用户 "{existing_user.name}" 已在系统中</h2>
-<p>无需重复添加。</p>
-<script>setTimeout(function(){{ window.close(); }}, 2000);</script>
-</body></html>"""
-            return HTMLResponse(content=html)
+            return HTMLResponse(content=_html_page(
+                title="已在系统中",
+                icon="✅",
+                heading=f"{existing_user.name} 已在系统中",
+                body="<p>无需重复添加，您已可以正常登录使用。</p>",
+                auto_close_ms=2500,
+            ))
 
         # 发超管确认卡片，由超管审批后才创建用户
         conf_svc = UserOperationConfirmationService(db)
@@ -302,14 +350,29 @@ async def add_user_callback(
                 department=user_info.get("department_name"),
             )
             user_service.create_user(user_create)
-            html = """<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>添加成功</title></head>
-<body style="text-align:center;padding:50px;font-family:sans-serif">
-<h2>已添加（系统初始化模式）</h2>
-<p>超级管理员尚未配置，已直接创建账号。</p>
-<script>setTimeout(function(){ window.close(); }, 3000);</script>
-</body></html>"""
-            return HTMLResponse(content=html)
+            return HTMLResponse(content=_html_page(
+                title="添加成功",
+                icon="🎉",
+                heading="账号已创建",
+                body="<p>系统初始化模式，已直接创建账号，现在可以登录使用。</p>",
+                auto_close_ms=3000,
+            ))
+
+        # 幂等拦截：同一飞书用户若已有待审批的申请，不再重复创建
+        from app.models.user_confirmation import UserOperationConfirmation, ConfirmationStatus
+        pending = db.query(UserOperationConfirmation).filter(
+            UserOperationConfirmation.initiator_feishu_userid == feishu_user_id,
+            UserOperationConfirmation.status == ConfirmationStatus.PENDING,
+        ).first()
+        if pending:
+            name = user_info.get("name", "您")
+            return HTMLResponse(content=_html_page(
+                title="申请待审批",
+                icon="⏳",
+                heading="申请正在审批中",
+                body=f"<p>{name}，您的加入申请已提交，正在等待超级管理员审批。</p><p>请耐心等候飞书通知，无需重复扫码。</p>",
+                auto_close_ms=4000,
+            ))
 
         # 使用超管 ID 作为发起人（扫码人尚无系统账号）
         conf = conf_svc.create_confirmation(
@@ -340,25 +403,22 @@ async def add_user_callback(
         conf_svc.send_account_op_card_to_super_admin(conf)
 
         name = user_info.get("name", "您")
-        html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>申请已提交</title></head>
-<body style="text-align:center;padding:50px;font-family:sans-serif">
-<h2>申请已提交</h2>
-<p>{name}，您的加入申请已发送给超级管理员审批。</p>
-<p>审批通过后您将收到飞书通知，届时即可使用系统。</p>
-<script>setTimeout(function(){{ window.close(); }}, 4000);</script>
-</body></html>"""
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=_html_page(
+            title="申请已提交",
+            icon="📬",
+            heading="申请已提交",
+            body=f"<p>{name}，您的加入申请已发送给超级管理员审批。</p><p>审批通过后您将收到飞书通知，届时即可使用系统。</p>",
+            auto_close_ms=4000,
+        ))
     except HTTPException:
         raise
     except Exception as e:
-        html = f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8"><title>添加失败</title></head>
-<body style="text-align:center;padding:50px;font-family:sans-serif">
-<h2>用户添加失败</h2>
-<p>{str(e)}</p>
-</body></html>"""
-        return HTMLResponse(content=html)
+        return HTMLResponse(content=_html_page(
+            title="提交失败",
+            icon="❌",
+            heading="提交失败",
+            body="<p>系统发生错误，请稍后重试或联系管理员。</p>",
+        ))
 
 
 # ════════════════════════════════════════════════════════════

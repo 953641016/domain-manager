@@ -487,13 +487,16 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation)
+        # 移除对用户无意义的内部标记前缀
+        desc = desc.replace("【需超级管理员确认】", "").strip()
         if not approved:
             reason = confirmation.reject_reason or "未说明原因"
-            msg = f"❌ 您的操作申请被拒绝\n{desc}\n拒绝原因：{reason}"
+            msg = f"❌ 操作申请被拒绝\n操作：{desc}\n原因：{reason}"
         elif exec_error:
-            msg = f"⚠️ 超级管理员已授权，但执行时发生错误\n{desc}\n错误信息：{exec_error}\n请联系超级管理员处理。"
+            friendly = self._friendly_error(exec_error)
+            msg = f"⚠️ 操作执行失败\n操作：{desc}\n原因：{friendly}\n如有疑问请联系超级管理员"
         else:
-            msg = f"✅ 您的操作已获超级管理员授权并执行成功\n{desc}"
+            msg = f"✅ 操作执行成功\n操作：{desc}"
         try:
             from app.services.feishu_service import FeishuService
             FeishuService().send_text_message(receive_id, msg, receive_type)
@@ -653,14 +656,30 @@ class UserOperationConfirmationService:
             return "未指定"
         return ROLE_PERMISSIONS.get(role, {}).get("name", role)
 
+    @staticmethod
+    def _friendly_error(error: str) -> str:
+        """
+        将技术性异常信息转换为用户友好的中文提示。
+        规范：用户侧通知消息不得暴露原始 ID、SQL 错误或堆栈信息。
+        """
+        e = str(error).lower()
+        if "用户已存在" in error or "already exists" in e or ("unique" in e and "user" in e):
+            return "该用户已存在，可能是重复提交申请，无需再次处理"
+        if "feishu" in e and ("id" in e or "userid" in e):
+            return "飞书账号已绑定其他用户，请联系管理员确认"
+        if "not found" in e or "不存在" in error:
+            return "目标数据不存在或已被删除"
+        if "permission" in e or "权限" in error:
+            return "权限不足，无法执行此操作"
+        if "timeout" in e or "超时" in error:
+            return "操作超时，请稍后重试"
+        return "系统执行异常，请联系超级管理员"
+
     def _format_user_op(self, prefix: str, action: str, details: dict) -> str:
         """渲染用户增改删的描述文本"""
         if action == "create_user":
             ud = details.get("user_data", {})
-            return (
-                f"{prefix}新增用户：{ud.get('name')}"
-                f"（角色：{self._role_name(ud.get('role'))}，飞书：{ud.get('feishu_user_id') or '未填'}）"
-            )
+            return f"{prefix}新增用户：{ud.get('name')}（{self._role_name(ud.get('role'))}）"
 
         if action == "update_user":
             changes = details.get("changes", {}) or {}
@@ -711,7 +730,7 @@ class UserOperationConfirmationService:
             return self._format_user_op(prefix, action, details)
 
         if op_type == ConfirmationOperationType.ADD_DOMAIN_SPEC:
-            return f"{prefix}添加域名专员：{target_data.get('name')} ({target_data.get('feishu_userid')})"
+            return f"{prefix}添加用户：{target_data.get('name')}"
 
         elif op_type == ConfirmationOperationType.UPDATE_DOMAIN_SPEC:
             changes = []
@@ -729,7 +748,7 @@ class UserOperationConfirmationService:
             return f"{prefix}变更用户角色：{target_data.get('name')} - {old_role_name} → {new_role_name}"
 
         elif op_type == ConfirmationOperationType.ADD_ADMIN:
-            return f"{prefix}添加系统管理员：{target_data.get('name')} ({target_data.get('feishu_userid')})"
+            return f"{prefix}添加系统管理员：{target_data.get('name')}"
 
         elif op_type == ConfirmationOperationType.REMOVE_ADMIN:
             return f"{prefix}移除系统管理员：{target_data.get('name')}"
