@@ -7,15 +7,21 @@ import UserManagement from './config/UserManagement';
 import { formatDateTime } from '@/utils/datetime';
 
 interface RegistrarInfo {
+  id: number;
   code: string;
   name: string;
-  description: string;
+  description: string | null;
+  api_endpoint: string | null;
+  is_enabled: boolean;
 }
 
 interface DnsProviderInfo {
+  id: number;
   code: string;
   name: string;
-  description: string;
+  description: string | null;
+  api_endpoint: string | null;
+  is_enabled: boolean;
 }
 
 interface RegAccount {
@@ -99,6 +105,16 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   });
   const [defaultsLoading, setDefaultsLoading] = useState(false);
 
+  // ========== 注册商 CRUD 模态框 ==========
+  const [showRegistrarModal, setShowRegistrarModal] = useState(false);
+  const [editingRegistrar, setEditingRegistrar] = useState<RegistrarInfo | null>(null);
+  const [registrarForm, setRegistrarForm] = useState({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+
+  // ========== DNS 服务商 CRUD 模态框 ==========
+  const [showDnsProviderModal, setShowDnsProviderModal] = useState(false);
+  const [editingDnsProvider, setEditingDnsProvider] = useState<DnsProviderInfo | null>(null);
+  const [dnsProviderForm, setDnsProviderForm] = useState({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+
   useEffect(() => {
     fetchConfigInfo();
   }, []);
@@ -113,11 +129,11 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     try {
       setLoading(true);
       const [registrarsRes, dnsRes] = await Promise.all([
-        api.get('/registrar/list'),
-        api.get('/registrar/dns-providers'),
+        api.get('/providers/registrars?enabled_only=false'),
+        api.get('/providers/dns-providers?enabled_only=false'),
       ]);
-      setRegistrars(registrarsRes.data.registrars || []);
-      setDnsProviders(dnsRes.data.dns_providers || []);
+      setRegistrars(Array.isArray(registrarsRes.data) ? registrarsRes.data : []);
+      setDnsProviders(Array.isArray(dnsRes.data) ? dnsRes.data : []);
     } catch (err) {
       console.error('获取配置信息失败:', err);
     } finally {
@@ -311,6 +327,120 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     }
   };
 
+  // ==================== 注册商 CRUD ====================
+
+  const openRegistrarModal = (reg?: RegistrarInfo) => {
+    if (reg) {
+      setEditingRegistrar(reg);
+      setRegistrarForm({ name: reg.name, code: reg.code, description: reg.description || '', api_endpoint: reg.api_endpoint || '', is_enabled: reg.is_enabled });
+    } else {
+      setEditingRegistrar(null);
+      setRegistrarForm({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+    }
+    setShowRegistrarModal(true);
+  };
+
+  const closeRegistrarModal = () => { setShowRegistrarModal(false); setEditingRegistrar(null); };
+
+  const handleRegistrarSave = async () => {
+    if (!registrarForm.name || (!editingRegistrar && !registrarForm.code)) {
+      alert('请填写名称' + (editingRegistrar ? '' : '和唯一代码'));
+      return;
+    }
+    try {
+      let res;
+      if (editingRegistrar) {
+        res = await api.put(`/providers/registrars/${editingRegistrar.id}`, {
+          name: registrarForm.name,
+          description: registrarForm.description || undefined,
+          api_endpoint: registrarForm.api_endpoint || undefined,
+          is_enabled: registrarForm.is_enabled,
+        });
+      } else {
+        res = await api.post('/providers/registrars', {
+          name: registrarForm.name,
+          code: registrarForm.code.toLowerCase(),
+          description: registrarForm.description || undefined,
+          api_endpoint: registrarForm.api_endpoint || undefined,
+          is_enabled: registrarForm.is_enabled,
+        });
+      }
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      closeRegistrarModal();
+      fetchConfigInfo();
+    } catch (err: any) {
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleRegistrarDelete = async (reg: RegistrarInfo) => {
+    if (!confirm(`确定要删除注册商「${reg.name}」吗？此操作需超管飞书确认。`)) return;
+    try {
+      const res = await api.delete(`/providers/registrars/${reg.id}`);
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      fetchConfigInfo();
+    } catch (err: any) {
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  // ==================== DNS 服务商 CRUD ====================
+
+  const openDnsProviderModal = (prov?: DnsProviderInfo) => {
+    if (prov) {
+      setEditingDnsProvider(prov);
+      setDnsProviderForm({ name: prov.name, code: prov.code, description: prov.description || '', api_endpoint: prov.api_endpoint || '', is_enabled: prov.is_enabled });
+    } else {
+      setEditingDnsProvider(null);
+      setDnsProviderForm({ name: '', code: '', description: '', api_endpoint: '', is_enabled: true });
+    }
+    setShowDnsProviderModal(true);
+  };
+
+  const closeDnsProviderModal = () => { setShowDnsProviderModal(false); setEditingDnsProvider(null); };
+
+  const handleDnsProviderSave = async () => {
+    if (!dnsProviderForm.name || (!editingDnsProvider && !dnsProviderForm.code)) {
+      alert('请填写名称' + (editingDnsProvider ? '' : '和唯一代码'));
+      return;
+    }
+    try {
+      let res;
+      if (editingDnsProvider) {
+        res = await api.put(`/providers/dns-providers/${editingDnsProvider.id}`, {
+          name: dnsProviderForm.name,
+          description: dnsProviderForm.description || undefined,
+          api_endpoint: dnsProviderForm.api_endpoint || undefined,
+          is_enabled: dnsProviderForm.is_enabled,
+        });
+      } else {
+        res = await api.post('/providers/dns-providers', {
+          name: dnsProviderForm.name,
+          code: dnsProviderForm.code.toLowerCase(),
+          description: dnsProviderForm.description || undefined,
+          api_endpoint: dnsProviderForm.api_endpoint || undefined,
+          is_enabled: dnsProviderForm.is_enabled,
+        });
+      }
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      closeDnsProviderModal();
+      fetchConfigInfo();
+    } catch (err: any) {
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleDnsProviderDelete = async (prov: DnsProviderInfo) => {
+    if (!confirm(`确定要删除 DNS 服务商「${prov.name}」吗？此操作需超管飞书确认。`)) return;
+    try {
+      const res = await api.delete(`/providers/dns-providers/${prov.id}`);
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      fetchConfigInfo();
+    } catch (err: any) {
+      alert('操作失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
   // ==================== 渲染工具 ====================
 
   const findRegistrarName = (code: string) => {
@@ -361,38 +491,170 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
           {/* ==================== 注册商配置 ==================== */}
           {activeTab === 'registrar' && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold">支持的注册商</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {registrars.map((reg) => (
-                  <div
-                    key={reg.code}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
-                  >
-                    <h3 className="font-medium text-gray-800">{reg.name}</h3>
-                    <p className="text-sm text-gray-500 mt-1">{reg.description}</p>
-                    <div className="mt-2 text-xs text-gray-400">Code: {reg.code}</div>
-                  </div>
-                ))}
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-semibold">注册商管理</h2>
+                <button
+                  onClick={() => openRegistrarModal()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  新增注册商
+                </button>
               </div>
+              <p className="text-sm text-gray-500">新增/修改/删除操作需超级管理员飞书确认后生效。</p>
+              {registrars.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">暂无注册商，请新增</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {registrars.map((reg) => (
+                    <div key={reg.code} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0 pr-2">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium text-gray-800">{reg.name}</h3>
+                            <span className={`inline-flex px-1.5 py-0.5 text-xs rounded-full ${reg.is_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {reg.is_enabled ? '启用' : '禁用'}
+                            </span>
+                          </div>
+                          {reg.description && <p className="text-sm text-gray-500 mt-1">{reg.description}</p>}
+                          <div className="mt-1 text-xs text-gray-400">code: {reg.code}</div>
+                        </div>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button onClick={() => openRegistrarModal(reg)} className="text-blue-600 hover:text-blue-800 text-sm">编辑</button>
+                          <button onClick={() => handleRegistrarDelete(reg)} className="text-red-600 hover:text-red-800 text-sm">删除</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 注册商弹窗 */}
+              {showRegistrarModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg w-full max-w-lg">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                      <h3 className="text-lg font-medium text-gray-900">{editingRegistrar ? '编辑注册商' : '新增注册商'}</h3>
+                      <button onClick={closeRegistrarModal} className="text-gray-400 hover:text-gray-600">关闭</button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">名称 <span className="text-red-500">*</span></label>
+                        <input type="text" value={registrarForm.name} onChange={(e) => setRegistrarForm({ ...registrarForm, name: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="如：Cloudflare" />
+                      </div>
+                      {!editingRegistrar && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">唯一代码 <span className="text-red-500">*</span></label>
+                          <input type="text" value={registrarForm.code} onChange={(e) => setRegistrarForm({ ...registrarForm, code: e.target.value })}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="如：cloudflare（创建后不可修改）" />
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                        <input type="text" value={registrarForm.description} onChange={(e) => setRegistrarForm({ ...registrarForm, description: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="可选说明" />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" id="reg-enabled" checked={registrarForm.is_enabled}
+                          onChange={(e) => setRegistrarForm({ ...registrarForm, is_enabled: e.target.checked })} className="w-4 h-4" />
+                        <label htmlFor="reg-enabled" className="text-sm text-gray-700">启用</label>
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-700">
+                        提交后将发送飞书确认给超级管理员，审批通过后生效。
+                      </div>
+                    </div>
+                    <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
+                      <button onClick={closeRegistrarModal} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg">取消</button>
+                      <button onClick={handleRegistrarSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">提交申请</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
           {/* ==================== DNS配置 ==================== */}
           {activeTab === 'dns' && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold">支持的DNS服务商</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {dnsProviders.map((provider) => (
-                  <div
-                    key={provider.code}
-                    className="border border-gray-200 rounded-lg p-4 hover:border-blue-300"
-                  >
-                    <h3 className="font-medium text-gray-800">{provider.name}</h3>
-                    <p className="text-sm text-gray-500 mt-1">{provider.description}</p>
-                    <div className="mt-2 text-xs text-gray-400">Code: {provider.code}</div>
-                  </div>
-                ))}
+              <div className="flex justify-between items-center">
+                <h2 className="text-lg font-semibold">DNS 服务商管理</h2>
+                <button
+                  onClick={() => openDnsProviderModal()}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  新增 DNS 服务商
+                </button>
               </div>
+              <p className="text-sm text-gray-500">新增/修改/删除操作需超级管理员飞书确认后生效。</p>
+              {dnsProviders.length === 0 ? (
+                <div className="text-center py-12 text-gray-400">暂无 DNS 服务商，请新增</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {dnsProviders.map((prov) => (
+                    <div key={prov.code} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0 pr-2">
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-medium text-gray-800">{prov.name}</h3>
+                            <span className={`inline-flex px-1.5 py-0.5 text-xs rounded-full ${prov.is_enabled ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                              {prov.is_enabled ? '启用' : '禁用'}
+                            </span>
+                          </div>
+                          {prov.description && <p className="text-sm text-gray-500 mt-1">{prov.description}</p>}
+                          <div className="mt-1 text-xs text-gray-400">code: {prov.code}</div>
+                        </div>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button onClick={() => openDnsProviderModal(prov)} className="text-blue-600 hover:text-blue-800 text-sm">编辑</button>
+                          <button onClick={() => handleDnsProviderDelete(prov)} className="text-red-600 hover:text-red-800 text-sm">删除</button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* DNS 服务商弹窗 */}
+              {showDnsProviderModal && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                  <div className="bg-white rounded-lg w-full max-w-lg">
+                    <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                      <h3 className="text-lg font-medium text-gray-900">{editingDnsProvider ? '编辑 DNS 服务商' : '新增 DNS 服务商'}</h3>
+                      <button onClick={closeDnsProviderModal} className="text-gray-400 hover:text-gray-600">关闭</button>
+                    </div>
+                    <div className="p-6 space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">名称 <span className="text-red-500">*</span></label>
+                        <input type="text" value={dnsProviderForm.name} onChange={(e) => setDnsProviderForm({ ...dnsProviderForm, name: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="如：Cloudflare DNS" />
+                      </div>
+                      {!editingDnsProvider && (
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">唯一代码 <span className="text-red-500">*</span></label>
+                          <input type="text" value={dnsProviderForm.code} onChange={(e) => setDnsProviderForm({ ...dnsProviderForm, code: e.target.value })}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="如：cloudflare（创建后不可修改）" />
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">描述</label>
+                        <input type="text" value={dnsProviderForm.description} onChange={(e) => setDnsProviderForm({ ...dnsProviderForm, description: e.target.value })}
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="可选说明" />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <input type="checkbox" id="dns-enabled" checked={dnsProviderForm.is_enabled}
+                          onChange={(e) => setDnsProviderForm({ ...dnsProviderForm, is_enabled: e.target.checked })} className="w-4 h-4" />
+                        <label htmlFor="dns-enabled" className="text-sm text-gray-700">启用</label>
+                      </div>
+                      <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-700">
+                        提交后将发送飞书确认给超级管理员，审批通过后生效。
+                      </div>
+                    </div>
+                    <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
+                      <button onClick={closeDnsProviderModal} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg">取消</button>
+                      <button onClick={handleDnsProviderSave} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">提交申请</button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

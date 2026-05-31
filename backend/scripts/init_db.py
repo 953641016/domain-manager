@@ -15,7 +15,7 @@ from app.models.user import User
 from app.models.permission import ROLE_PERMISSIONS
 from app.config import Config
 from app.models.user_confirmation import UserOperationConfirmation
-from app.models.domain import Domain, RegAccount, DnsAccount
+from app.models.domain import Domain, RegAccount, DnsAccount, Registrar, DnsProvider
 from app.models.dns import DnsRecord
 from app.models.audit import AuditLog
 from app.models.request import Request
@@ -106,13 +106,36 @@ def init_db():
         else:
             print("\n3. 系统管理员用户已存在")
 
+        # 初始化注册商数据（已实现适配器的服务商）
+        print("\n4. 初始化注册商与DNS服务商数据...")
+        DEFAULT_REGISTRARS = [
+            {"code": "cloudflare", "name": "Cloudflare", "description": "Cloudflare 域名注册（同时支持 DNS 解析）"},
+            {"code": "godaddy",    "name": "GoDaddy",    "description": "GoDaddy 域名注册"},
+        ]
+        DEFAULT_DNS_PROVIDERS = [
+            {"code": "cloudflare", "name": "Cloudflare DNS", "description": "Cloudflare DNS 解析（推荐首选）"},
+        ]
+        for item in DEFAULT_REGISTRARS:
+            if not db.query(Registrar).filter_by(code=item["code"]).first():
+                db.add(Registrar(code=item["code"], name=item["name"], description=item["description"], is_enabled=True))
+                print(f"   ✓ 注册商已添加: {item['name']}")
+            else:
+                print(f"   - 注册商已存在: {item['name']}")
+        for item in DEFAULT_DNS_PROVIDERS:
+            if not db.query(DnsProvider).filter_by(code=item["code"]).first():
+                db.add(DnsProvider(code=item["code"], name=item["name"], description=item["description"], is_enabled=True))
+                print(f"   ✓ DNS服务商已添加: {item['name']}")
+            else:
+                print(f"   - DNS服务商已存在: {item['name']}")
+        db.commit()
+
         # 显示所有角色信息
-        print("\n4. 可用角色列表:")
+        print("\n5. 可用角色列表:")
         for role_code, role_info in ROLE_PERMISSIONS.items():
             print(f"   - {role_code}: {role_info['name']} ({role_info['description']})")
 
         # 显示当前用户统计
-        print("\n5. 当前用户统计:")
+        print("\n6. 当前用户统计:")
         total_users = db.query(User).count()
         active_users = db.query(User).filter(User.is_active == True).count()
         print(f"   - 总用户数: {total_users}")
