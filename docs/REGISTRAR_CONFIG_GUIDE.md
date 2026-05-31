@@ -326,6 +326,43 @@ Zone ID: (可选，或动态获取)
 | 确认 IP 白名单 | 每季度 |
 | 审计操作记录 | 每月 |
 
+### 7.4 各注册商最小权限速查
+
+**Cloudflare（注册商）**
+
+| 权限 | 用途 |
+|------|------|
+| `Zone:DNS:Edit` | 设置域名 NS 服务器 |
+| `Account:Registrar:Domains:Read` | 读取域名信息、到期时间 |
+| `Account:Registrar:Domains:Create` | 执行域名注册 |
+| `Account:Registrar:Domains:Update` | 执行域名续费 |
+
+> ⚠️ 避免使用 `Account:All`、`Zone:All`、`User:All`
+
+**Cloudflare（DNS 解析）**
+
+| 权限 | 用途 |
+|------|------|
+| `Zone:DNS:Edit` | 创建、修改、删除 DNS 记录 |
+| `Zone:Read` | 读取 Zone ID 等基本信息 |
+
+**GoDaddy**
+
+| 权限 | 用途 |
+|------|------|
+| `domains.read` | 读取域名信息 |
+| `domains.write` | 注册域名 |
+| `domains.dns.read` | 读取 DNS 记录 |
+| `domains.dns.write` | 修改 DNS 记录 |
+
+> GoDaddy API Key 无细粒度权限控制，务必使用**专用子账号** + IP 白名单。
+
+**Namecheap**
+
+- API 权限通过 **IP 白名单** 控制，无细粒度权限选项
+- 必须在账户 Tools → API Access 中添加服务器公网 IP
+- 强烈建议使用专用子账号
+
 ---
 
 ## 8. 常见问题

@@ -63,9 +63,10 @@ domain-manager/
 │   │   └── components/    # 通用组件
 │   └── package.json
 │
-├── scripts/                # 部署脚本
+├── scripts/                # 工具脚本
 ├── nginx/                  # Nginx配置
-├── systemd/                # Systemd服务
+├── docker-compose.yml      # Docker编排
+├── deploy.sh               # 部署入口脚本
 └── docs/                   # 文档
 ```
 
@@ -106,25 +107,30 @@ docker-compose up -d
 
 ### 传统部署
 
-如果没有Docker环境，可参考 [传统部署指南](docs/deployment.md#方式二传统部署)
+如果没有Docker环境，可参考 [服务器部署与运维手册](docs/服务器部署维护文档.md)
 
 ## 文档
 
 详细文档请查看 [docs/](docs/) 目录：
 
-- [产品需求文档](docs/prd.md)
-- [技术架构文档](docs/arch.md)
-- [部署文档](docs/deployment.md)
-- [飞书权限配置](docs/feishu-permission-config.md)
-- [项目结构说明](docs/PROJECT_STRUCTURE.md)
+| 文档 | 说明 |
+|------|------|
+| [服务器部署与运维手册](docs/服务器部署维护文档.md) | 部署、SSH、SSL、故障排查（权威） |
+| [飞书运维手册](docs/feishu-ops-manual.md) | 飞书平台配置、Webhook、审批流（权威） |
+| [安全配置指南](docs/SECURITY_GUIDE.md) | 角色权限、加固步骤、安全检查清单 |
+| [注册商配置指南](docs/REGISTRAR_CONFIG_GUIDE.md) | Cloudflare/GoDaddy API Key 获取步骤 |
+| [权限与流程设计](docs/权限与流程设计.md) | 审批流、通知设计（权威参考） |
+| [技术架构文档](docs/arch.md) | 系统架构概览 |
+| [产品需求文档](docs/prd.md) | 产品功能定义 |
 
 ## 用户角色
 
-| 角色 | 功能 | Web访问 |
-|------|------|--------|
-| 业务同事 | 提交申请 | ❌ |
-| 域名专员 | 审批、注册、续费 | ✅ |
-| 系统管理员 | 配置管理、用户管理 | ✅ |
+| 角色 | 层级 | 功能 | Web访问 |
+|------|------|------|--------|
+| 业务同事 (business) | 0 | 通过飞书提交申请 | ❌ |
+| 域名专员 (domain_spec) | 1 | 审批、注册、续费、DNS管理 | ✅ |
+| 系统管理员 (admin) | 2 | 配置管理、用户管理 | ✅ |
+| 超级管理员 (super_admin) | 3 | 全部权限 + 关键操作飞书确认 | ✅ |
 
 ## 技术栈
 
@@ -141,15 +147,15 @@ docker-compose up -d
 - **样式**: Tailwind CSS
 
 ### 部署
-- **Web服务器**: Nginx
-- **进程管理**: Systemd + Gunicorn
+- **Web服务器**: Nginx（反向代理）
+- **容器化**: Docker Compose（3 容器：backend / frontend / nginx）
 
 ## 支持的注册商
 
-- Cloudflare
-- GoDaddy
-- Namecheap
-- Enom
+| 注册商 | 域名注册 | DNS 解析 |
+|--------|---------|---------|
+| Cloudflare | ✅ | ✅（推荐首选） |
+| GoDaddy | ✅ | 单独配置 |
 
 ## 开发
 
@@ -179,7 +185,7 @@ python scripts/manage_users.py add --userid "ou_xxx" --name "张三" --role doma
 python scripts/manage_users.py list
 ```
 
-详细说明请查看 [docs/feishu-permission-config.md](docs/feishu-permission-config.md)
+详细说明请查看 [安全配置指南](docs/SECURITY_GUIDE.md)
 
 ## 许可证
 
