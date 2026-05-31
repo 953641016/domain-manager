@@ -12,6 +12,25 @@
 
 ---
 
+## [1.3.2] — 2026-05-31
+
+### 新增
+- **账号归属权限模型**：`RegAccount` / `DnsAccount` 现在严格归属于创建该账号的专员（`owner_id`），只有账号归属人和超管可见、可管理
+- 账号列表/详情响应新增 `owner_name` 字段（后端 JOIN 注入，前端无需二次请求）
+- `POST /domains/accounts/reg` 和 `POST /domains/accounts/dns` 新增 `target_owner_id` 字段：super_admin 新建时可在 Web 端下拉选择归属专员（domain_spec 或自身），domain_spec 创建时忽略此字段、自动归属自己
+- 账号列表前端增加"归属专员"列（仅超管可见）
+- 新建账号弹窗对超管显示"归属专员"下拉列表（含全部 domain_spec 及 super_admin 用户）
+
+### 修复
+- `GET /domains/accounts/reg/{id}` 和 `GET /domains/accounts/dns/{id}` 鉴权由 `get_current_active_user`（任意登录用户）改为 `require_view_accounts`，并增加 domain_spec 归属校验（访问他人账号返回 403）
+- 前端账号增删改弹窗不再显示"操作成功"，改为统一展示后端 `pending_approval` 消息，避免误导用户认为操作已立即生效
+- 前端编辑/删除按钮对 domain_spec 按 `owner_id === currentUserId` 受限，非归属账号显示"无权操作"而非隐藏（与后端鉴权一致）
+
+### 规范
+- `POST /domains/accounts/reg` 和 `POST /domains/accounts/dns` 移除创建流程中的死代码（`_make_confirmation` 返回后的不可达语句）
+
+---
+
 ## [1.3.1] — 2026-05-31
 
 ### 修复
