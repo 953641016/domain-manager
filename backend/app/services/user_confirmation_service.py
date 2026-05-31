@@ -547,9 +547,11 @@ class UserOperationConfirmationService:
         desc = self.format_operation_description(confirmation)
         details = confirmation.operation_details or {}
 
+        # 去掉卡片里重复的"【需超级管理员确认】"前缀（卡片本身就是发给超管的）
+        desc_clean = desc.replace("【需超级管理员确认】", "").strip()
         lines = [
             f"**操作人：** {confirmation.initiator_name}",
-            f"**操作内容：** {desc}",
+            f"**操作内容：**\n{desc_clean}",
         ]
         if api_key_masked:
             lines.append(f"**API Key：** {api_key_masked}")
