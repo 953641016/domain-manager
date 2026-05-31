@@ -19,6 +19,7 @@ from app.models.domain import Domain, RegAccount, DnsAccount, Registrar, DnsProv
 from app.models.dns import DnsRecord
 from app.models.audit import AuditLog
 from app.models.request import Request
+from app.models.system import SystemDefaults  # 确保 system_defaults 表被 create_all 创建
 
 
 def init_db():

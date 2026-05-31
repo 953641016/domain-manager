@@ -102,7 +102,7 @@ app.add_middleware(
 )
 
 # 注册路由
-from app.api.v1 import auth, users, confirmations, feishu, domains, dns, requests, registrar, audit, ssl
+from app.api.v1 import auth, users, confirmations, feishu, domains, dns, requests, registrar, audit, ssl, config
 app.include_router(auth.router, prefix="/api/v1", tags=["认证"])
 app.include_router(users.router, prefix="/api/v1", tags=["用户"])
 app.include_router(confirmations.router, prefix="/api/v1", tags=["用户确认"])
@@ -111,6 +111,7 @@ app.include_router(domains.router, prefix="/api/v1", tags=["域名管理"])
 app.include_router(dns.router, prefix="/api/v1", tags=["DNS解析"])
 app.include_router(requests.router, prefix="/api/v1", tags=["申请管理"])
 app.include_router(registrar.router, prefix="/api/v1", tags=["服务商管理"])  # /providers/registrars & /providers/dns-providers
+app.include_router(config.router, prefix="/api/v1", tags=["系统配置"])       # /config/defaults
 app.include_router(audit.router, prefix="/api/v1", tags=["审计日志"])
 app.include_router(ssl.router, prefix="/api/v1", tags=["SSL证书管理"])
 

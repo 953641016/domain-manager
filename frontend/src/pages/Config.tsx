@@ -122,7 +122,12 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   useEffect(() => {
     if (activeTab === 'reg-accounts') loadRegAccounts();
     if (activeTab === 'dns-accounts') loadDnsAccounts();
-    if (activeTab === 'defaults') loadDefaults();
+    if (activeTab === 'defaults') {
+      loadDefaults();
+      // defaults 页需要账号列表填充下拉
+      loadRegAccounts();
+      loadDnsAccounts();
+    }
   }, [activeTab]);
 
   const fetchConfigInfo = async () => {
@@ -319,8 +324,9 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
 
   const handleSaveDefaults = async () => {
     try {
-      await api.put('/config/defaults', defaultConfig);
-      alert('保存成功');
+      const res = await api.put('/config/defaults', defaultConfig);
+      // 后端走飞书确认流程，返回 pending_approval
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
     } catch (err: any) {
       console.error('保存默认配置失败:', err);
       alert('保存失败: ' + (err.response?.data?.detail || err.message));
@@ -1001,35 +1007,41 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">默认注册账号ID</label>
-                    <input
-                      type="number"
+                    <label className="block text-sm font-medium text-gray-700 mb-1">默认注册账号</label>
+                    <select
                       value={defaultConfig.default_reg_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_reg_account_id: e.target.value ? Number(e.target.value) : null })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      placeholder="请输入注册账号ID（可选）"
-                    />
+                    >
+                      <option value="">不指定（可选）</option>
+                      {regAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}（{findRegistrarName(a.registrar_code)}）</option>
+                      ))}
+                    </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS账号ID</label>
-                    <input
-                      type="number"
+                    <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS账号</label>
+                    <select
                       value={defaultConfig.default_dns_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_dns_account_id: e.target.value ? Number(e.target.value) : null })}
                       className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                      placeholder="请输入DNS账号ID（可选）"
-                    />
+                    >
+                      <option value="">不指定（可选）</option>
+                      {dnsAccounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}（{findDnsProviderName(a.provider_code)}）</option>
+                      ))}
+                    </select>
                   </div>
                   <div className="pt-4">
                     <button
                       onClick={handleSaveDefaults}
                       className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
                     >
-                      保存配置
+                      提交申请
                     </button>
                   </div>
-                  <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 text-sm text-yellow-700">
-                    提示：如果后端尚未提供 <code className="bg-yellow-100 px-1 rounded">/config/defaults</code> 接口，此功能将无法使用。请联系后端开发人员。
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-700">
+                    默认配置仅作为新建域名时的初始建议值，申请人可在提交时手动选择覆盖。
                   </div>
                 </div>
               )}

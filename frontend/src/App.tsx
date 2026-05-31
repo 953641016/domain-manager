@@ -132,21 +132,26 @@ function AppRouter() {
               </PermissionRoute>
             }
           />
-          {/* 账号管理（注册账号 + DNS账号） */}
+          {/* 账号管理（注册账号 + DNS账号）
+              权限：domain_spec/super_admin 可发起；写操作后端要求超管飞书确认
+              admin 无 can_manage_accounts 权限，不列入此路由 */}
           <Route
             path="system/accounts"
             element={
-              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
-                <ConfigPage sections={['reg-accounts', 'dns-accounts']} title="域名账号管理" />
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.DOMAIN_SPEC]}>
+                {/* key 防止 React 复用同一 ConfigPage 实例导致 activeTab state 残留 */}
+                <ConfigPage key="accounts" sections={['reg-accounts', 'dns-accounts']} title="域名账号管理" />
               </PermissionRoute>
             }
           />
-          {/* 服务商与默认（注册商 + DNS服务商 + 默认配置） */}
+          {/* 服务商与默认（注册商目录 + DNS服务商目录 + 默认配置）
+              权限：domain_spec/super_admin 可发起；写操作后端要求超管飞书确认
+              admin 无 can_manage_providers 权限，不列入此路由 */}
           <Route
             path="system/providers"
             element={
-              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
-                <ConfigPage sections={['registrar', 'dns', 'defaults']} title="服务商与默认" />
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.DOMAIN_SPEC]}>
+                <ConfigPage key="providers" sections={['registrar', 'dns', 'defaults']} title="服务商与默认" />
               </PermissionRoute>
             }
           />
