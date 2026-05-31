@@ -102,6 +102,36 @@ def migrate():
     finally:
         db.close()
 
+    # 4. 存量 API Key 加密迁移（幂等：能解密=已加密，解密失败=明文→加密）
+    print("\n[4] 加密存量 API Key...")
+    try:
+        from app.core.encryption import get_encryption_service
+        enc = get_encryption_service()
+        db2 = SessionLocal()
+        try:
+            from app.models.domain import RegAccount, DnsAccount as DnsAcc
+            changed = 0
+            for model in (RegAccount, DnsAcc):
+                for acct in db2.query(model).all():
+                    updated = False
+                    for field in ("api_key", "api_secret"):
+                        val = getattr(acct, field)
+                        if not val:
+                            continue
+                        try:
+                            enc.decrypt(val)   # 已加密，跳过
+                        except Exception:
+                            setattr(acct, field, enc.encrypt(val))
+                            updated = True
+                    if updated:
+                        changed += 1
+            db2.commit()
+            print(f"    ✓ 已加密 {changed} 条存量记录")
+        finally:
+            db2.close()
+    except Exception as e:
+        print(f"    ⚠ 加密跳过（未配置 ENCRYPTION_KEY 或其他错误）: {e}")
+
     print("\n" + "=" * 60)
     print("迁移完成！")
     print("=" * 60)

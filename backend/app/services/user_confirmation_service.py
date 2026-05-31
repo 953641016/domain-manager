@@ -3,7 +3,7 @@
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.user import User
@@ -17,6 +17,8 @@ from app.models.user_confirmation import (
     ConfirmationOperationType,
     ConfirmationStatus
 )
+
+CONFIRMATION_EXPIRE_HOURS = 24  # 确认有效期
 
 
 class UserOperationConfirmationService:
@@ -56,12 +58,25 @@ class UserOperationConfirmationService:
             target_user_data=target_user_data,
             operation_details=operation_details,
             status=ConfirmationStatus.PENDING,
-            remark=remark
+            execution_status="pending",
+            source=remark or "web",           # 来源（调用方可通过 remark 传 source）
+            expires_at=datetime.utcnow() + timedelta(hours=CONFIRMATION_EXPIRE_HOURS),
+            remark=None
         )
 
         self.db.add(confirmation)
         self.db.commit()
         self.db.refresh(confirmation)
+
+        # 审计留痕 #1：申请已提交
+        self._audit(
+            action=f"{operation_type}_requested",
+            confirmation=confirmation,
+            user_id=initiator_user_id,
+            user_name=initiator_name,
+            status="success",
+            after_state={"operation_type": operation_type, "source": confirmation.source},
+        )
 
         return confirmation
 
@@ -156,8 +171,11 @@ class UserOperationConfirmationService:
         if not confirmation or not confirmation.is_pending:
             return None
 
-        # 审批人必须是超级管理员（恒定规则，见设计文档3.0带外确认）
-        # 注意：不再有"禁止自批"限制——超管自确认是设计允许的
+        # 幂等检查：已处理的确认不能重复执行（防飞书重投 / 手抖双击）
+        if not confirmation.is_pending:
+            return None
+
+        # 审批人必须是超级管理员
         super_admin = self.get_super_admin()
         if not super_admin or super_admin.id != approver_user_id:
             return None
@@ -168,19 +186,43 @@ class UserOperationConfirmationService:
         confirmation.approver_name = approver_name
         confirmation.approver_feishu_userid = approver_feishu_userid
         confirmation.confirmed_at = datetime.utcnow()
-
         self.db.commit()
         self.db.refresh(confirmation)
 
-        # 执行实际操作
+        # 审计留痕 #2：已授权
+        self._audit(
+            action=f"{confirmation.operation_type}_approved",
+            confirmation=confirmation,
+            user_id=approver_user_id,
+            user_name=approver_name,
+            status="success",
+            after_state={"approver": approver_name, "confirmed_via": "feishu_client"},
+        )
+
+        # 执行实际操作并追踪结果
+        exec_error = None
         try:
             self._execute_approved_action(confirmation)
+            confirmation.execution_status = "success"
         except Exception as e:
             import logging
             logging.getLogger(__name__).exception("执行授权操作失败: %s", e)
+            exec_error = str(e)
+            confirmation.execution_status = "failed"
+        self.db.commit()
 
-        # 通知发起人
-        self._notify_initiator(confirmation, approved=True)
+        # 审计留痕 #3：执行结果
+        self._audit(
+            action=f"{confirmation.operation_type}_executed",
+            confirmation=confirmation,
+            user_id=approver_user_id,
+            user_name=approver_name,
+            status="success" if not exec_error else "failed",
+            error_message=exec_error,
+        )
+
+        # 通知发起人（如实反映执行结果）
+        self._notify_initiator(confirmation, approved=True, exec_error=exec_error)
 
         return confirmation
 
@@ -207,23 +249,35 @@ class UserOperationConfirmationService:
         if not confirmation or not confirmation.is_pending:
             return None
 
-        # 拒绝人也必须是超级管理员
+        # 幂等：已处理不重复
+        if not confirmation.is_pending:
+            return None
+
         super_admin = self.get_super_admin()
         if not super_admin or super_admin.id != approver_user_id:
             return None
 
-        # 更新状态
         confirmation.status = ConfirmationStatus.REJECTED
+        confirmation.execution_status = "failed"
         confirmation.approver_user_id = approver_user_id
         confirmation.approver_name = approver_name
         confirmation.approver_feishu_userid = approver_feishu_userid
         confirmation.reject_reason = reject_reason
         confirmation.confirmed_at = datetime.utcnow()
-
         self.db.commit()
         self.db.refresh(confirmation)
 
-        # 通知发起人
+        # 审计留痕 #2：已拒绝
+        self._audit(
+            action=f"{confirmation.operation_type}_rejected",
+            confirmation=confirmation,
+            user_id=approver_user_id,
+            user_name=approver_name,
+            status="failed",
+            error_message=reject_reason,
+            after_state={"reason": reject_reason, "confirmed_via": "feishu_client"},
+        )
+
         self._notify_initiator(confirmation, approved=False)
 
         return confirmation
@@ -309,6 +363,7 @@ class UserOperationConfirmationService:
         details = confirmation.operation_details or {}
         domain_svc = DomainService(self.db)
 
+        # 账号操作：写库时 domain_service 会自动加密 API Key
         if op == ConfirmationOperationType.ADD_REG_ACCOUNT:
             data = RegAccountCreate(**details["data"])
             domain_svc.create_reg_account(data, owner_id=details.get("owner_id"))
@@ -361,8 +416,13 @@ class UserOperationConfirmationService:
                 self.db.delete(obj)
                 self.db.commit()
 
-    def _notify_initiator(self, confirmation: UserOperationConfirmation, approved: bool) -> None:
-        """通知发起人操作结果"""
+    def _notify_initiator(
+        self,
+        confirmation: UserOperationConfirmation,
+        approved: bool,
+        exec_error: Optional[str] = None,
+    ) -> None:
+        """通知发起人操作结果（如实反映执行状态）"""
         initiator = self.db.query(User).filter_by(id=confirmation.initiator_user_id).first()
         if not initiator:
             return
@@ -371,17 +431,47 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation)
-        if approved:
-            msg = f"✅ 您的操作已获超级管理员授权并执行\n{desc}"
-        else:
+        if not approved:
             reason = confirmation.reject_reason or "未说明原因"
             msg = f"❌ 您的操作申请被拒绝\n{desc}\n拒绝原因：{reason}"
+        elif exec_error:
+            msg = f"⚠️ 超级管理员已授权，但执行时发生错误\n{desc}\n错误信息：{exec_error}\n请联系超级管理员处理。"
+        else:
+            msg = f"✅ 您的操作已获超级管理员授权并执行成功\n{desc}"
         try:
             from app.services.feishu_service import FeishuService
             FeishuService().send_text_message(receive_id, msg, receive_type)
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给发起人失败")
+
+    def _audit(
+        self,
+        action: str,
+        confirmation: UserOperationConfirmation,
+        user_id: Optional[int],
+        user_name: Optional[str],
+        status: str = "success",
+        error_message: Optional[str] = None,
+        after_state: Optional[dict] = None,
+    ) -> None:
+        """写审计日志（三时机共用）"""
+        try:
+            from app.services.audit_service import AuditService
+            AuditService(self.db).log(
+                action=action,
+                resource_type="confirmation",
+                resource_id=str(confirmation.id),
+                resource_name=self.format_operation_description(confirmation),
+                user_id=user_id,
+                user_name=user_name,
+                after_state=after_state or {},
+                status=status,
+                error_message=error_message,
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("写审计日志失败")
 
     def send_account_op_card_to_super_admin(
         self,

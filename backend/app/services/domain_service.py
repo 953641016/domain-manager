@@ -13,6 +13,28 @@ from app.schemas.domain import (
 )
 
 
+def _enc(value: Optional[str]) -> Optional[str]:
+    """加密 API Key/Secret（无 ENCRYPTION_KEY 则降级为明文）"""
+    if not value:
+        return value
+    try:
+        from app.core.encryption import get_encryption_service
+        return get_encryption_service().encrypt(value)
+    except Exception:
+        return value
+
+
+def _dec(value: Optional[str]) -> Optional[str]:
+    """解密 API Key/Secret（非密文时原样返回，向后兼容明文存量）"""
+    if not value:
+        return value
+    try:
+        from app.core.encryption import get_encryption_service
+        return get_encryption_service().decrypt(value)
+    except Exception:
+        return value  # 明文存量：解密失败则原样返回
+
+
 class DomainService:
     """域名服务类"""
 
@@ -149,12 +171,12 @@ class DomainService:
         return self.db.query(RegAccount).filter(RegAccount.id == account_id).first()
 
     def create_reg_account(self, data: RegAccountCreate, owner_id: Optional[int] = None) -> RegAccount:
-        """创建注册账号"""
+        """创建注册账号（API Key 加密存储）"""
         account = RegAccount(
             name=data.name,
             registrar_code=data.registrar_code,
-            api_key=data.api_key,
-            api_secret=data.api_secret,
+            api_key=_enc(data.api_key),
+            api_secret=_enc(data.api_secret),
             remark=data.remark,
             owner_id=owner_id
         )
@@ -164,17 +186,27 @@ class DomainService:
         return account
 
     def update_reg_account(self, account_id: int, data: RegAccountUpdate) -> Optional[RegAccount]:
-        """更新注册账号"""
+        """更新注册账号（API Key 加密存储）"""
         account = self.get_reg_account(account_id)
         if not account:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
+            if key in ("api_key", "api_secret") and value:
+                value = _enc(value)
             setattr(account, key, value)
 
         self.db.commit()
         self.db.refresh(account)
+        return account
+
+    def get_reg_account_decrypted(self, account_id: int) -> Optional[RegAccount]:
+        """获取注册账号并解密 Key（仅供适配器层调用，不对外暴露）"""
+        account = self.get_reg_account(account_id)
+        if account:
+            account.api_key = _dec(account.api_key)
+            account.api_secret = _dec(account.api_secret)
         return account
 
     def delete_reg_account(self, account_id: int) -> bool:
@@ -211,12 +243,12 @@ class DomainService:
         return self.db.query(DnsAccount).filter(DnsAccount.id == account_id).first()
 
     def create_dns_account(self, data: DnsAccountCreate, owner_id: Optional[int] = None) -> DnsAccount:
-        """创建DNS账号"""
+        """创建DNS账号（API Key 加密存储）"""
         account = DnsAccount(
             name=data.name,
             provider_code=data.provider_code,
-            api_key=data.api_key,
-            api_secret=data.api_secret,
+            api_key=_enc(data.api_key),
+            api_secret=_enc(data.api_secret),
             remark=data.remark,
             owner_id=owner_id
         )
@@ -226,17 +258,27 @@ class DomainService:
         return account
 
     def update_dns_account(self, account_id: int, data: DnsAccountUpdate) -> Optional[DnsAccount]:
-        """更新DNS账号"""
+        """更新DNS账号（API Key 加密存储）"""
         account = self.get_dns_account(account_id)
         if not account:
             return None
 
         update_data = data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
+            if key in ("api_key", "api_secret") and value:
+                value = _enc(value)
             setattr(account, key, value)
 
         self.db.commit()
         self.db.refresh(account)
+        return account
+
+    def get_dns_account_decrypted(self, account_id: int) -> Optional[DnsAccount]:
+        """获取DNS账号并解密 Key（仅供适配器层调用，不对外暴露）"""
+        account = self.get_dns_account(account_id)
+        if account:
+            account.api_key = _dec(account.api_key)
+            account.api_secret = _dec(account.api_secret)
         return account
 
     def delete_dns_account(self, account_id: int) -> bool:

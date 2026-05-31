@@ -76,7 +76,7 @@ class ExecutionService:
 
     def _execute_dns(self, request: Request) -> Dict[str, Any]:
         account = (
-            self.domain_service.get_dns_account(request.selected_dns_account_id)
+            self.domain_service.get_dns_account_decrypted(request.selected_dns_account_id)
             if request.selected_dns_account_id else None
         )
         provider_code = request.selected_dns_provider_code or (account.provider_code if account else None)
@@ -141,7 +141,7 @@ class ExecutionService:
 
     def _execute_register(self, request: Request) -> Dict[str, Any]:
         account = (
-            self.domain_service.get_reg_account(request.selected_reg_account_id)
+            self.domain_service.get_reg_account_decrypted(request.selected_reg_account_id)
             if request.selected_reg_account_id else None
         )
         registrar_code = request.selected_registrar_code or (account.registrar_code if account else None)
