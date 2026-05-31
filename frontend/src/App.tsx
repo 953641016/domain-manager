@@ -134,7 +134,7 @@ function AppRouter() {
             path="system/accounts"
             element={
               <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
-                <ConfigPage sections={['reg-accounts', 'dns-accounts']} title="账号管理" />
+                <ConfigPage sections={['reg-accounts', 'dns-accounts']} title="域名账号管理" />
               </PermissionRoute>
             }
           />

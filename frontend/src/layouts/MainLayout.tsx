@@ -65,7 +65,7 @@ const MENU: MenuEntry[] = [
     roles: ADMIN_ROLES,
     children: [
       { key: 'users', label: '用户管理', path: AppRoutes.SYSTEM_USERS, icon: '👥' },
-      { key: 'accounts', label: '账号管理', path: AppRoutes.SYSTEM_ACCOUNTS, icon: '🔑' },
+      { key: 'accounts', label: '域名账号管理', path: AppRoutes.SYSTEM_ACCOUNTS, icon: '🔑' },
       { key: 'providers', label: '服务商与默认', path: AppRoutes.SYSTEM_PROVIDERS, icon: '🏷️' },
       { key: 'statistics', label: '统计报表', path: AppRoutes.STATISTICS, icon: '📈' },
       { key: 'logs', label: '操作日志', path: AppRoutes.LOGS, icon: '📝' },
