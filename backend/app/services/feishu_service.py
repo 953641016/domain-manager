@@ -259,50 +259,43 @@ class FeishuService:
         receive_id: str,
         domain_name: str,
         expire_days: int,
-        receive_id_type: str = "open_id"
+        expiration_date: str = "",
+        registrar: str = "",
+        receive_id_type: str = "open_id",
     ) -> Dict[str, Any]:
-        """
-        发送域名到期提醒卡片
-        
-        Args:
-            receive_id: 接收者ID
-            domain_name: 域名
-            expire_days: 剩余天数
-            receive_id_type: 接收者ID类型
-        
-        Returns:
-            飞书API响应
-        """
+        """发送域名到期提醒卡片（按紧急程度分级）"""
+        if expire_days <= 7:
+            title = "🚨 域名即将到期"
+            color = "red"
+            urgency = f"**仅剩 {expire_days} 天**，请立即联系注册商续费！"
+        elif expire_days <= 30:
+            title = "⚠️ 域名到期提醒"
+            color = "orange"
+            urgency = f"剩余 **{expire_days}** 天，请尽快安排续费。"
+        else:
+            title = "📅 域名到期提醒"
+            color = "yellow"
+            urgency = f"剩余 {expire_days} 天，请适时安排续费。"
+
+        info_lines = [f"**域名**：{domain_name}"]
+        if expiration_date:
+            info_lines.append(f"**到期日期**：{expiration_date}")
+        if registrar:
+            info_lines.append(f"**注册商**：{registrar}")
+        info_lines.append(f"\n{urgency}")
+
         card_content = {
-            "config": {
-                "wide_screen_mode": True
-            },
+            "config": {"wide_screen_mode": True},
             "header": {
-                "title": {
-                    "tag": "plain_text",
-                    "content": "⚠️ 域名到期提醒"
-                },
-                "template": "orange"
+                "title": {"tag": "plain_text", "content": title},
+                "template": color,
             },
             "elements": [
                 {
                     "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": f"**域名**: {domain_name}\n**剩余天数**: {expire_days} 天"
-                    }
+                    "text": {"tag": "lark_md", "content": "\n".join(info_lines)},
                 },
-                {
-                    "tag": "hr"
-                },
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "plain_text",
-                        "content": "请及时处理域名续费！"
-                    }
-                }
-            ]
+            ],
         }
         return self.send_card_message(receive_id, card_content, receive_id_type)
 
@@ -387,11 +380,15 @@ class FeishuService:
                         },
                         {
                             "tag": "button",
-                            "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                            "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
                             "type": "danger",
                             "value": {"action": "reject_dns_request", "request_id": request_id},
                         },
                     ],
+                },
+                {
+                    "tag": "note",
+                    "elements": [{"tag": "plain_text", "content": f"申请编号：#{str(request_id)[:8]}"}],
                 },
             ],
         }

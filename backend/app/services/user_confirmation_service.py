@@ -499,19 +499,34 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation)
-        # 移除对用户无意义的内部标记前缀
         desc = desc.replace("【需超级管理员确认】", "").strip()
         if not approved:
+            card_title = "❌ 操作申请被拒绝"
+            card_color = "red"
             reason = confirmation.reject_reason or "未说明原因"
-            msg = f"❌ 操作申请被拒绝\n操作：{desc}\n原因：{reason}"
+            body = f"**操作**：{desc}\n**拒绝原因**：{reason}"
         elif exec_error:
+            card_title = "⚠️ 操作执行失败"
+            card_color = "orange"
             friendly = self._friendly_error(exec_error)
-            msg = f"⚠️ 操作执行失败\n操作：{desc}\n原因：{friendly}\n如有疑问请联系超级管理员"
+            body = f"**操作**：{desc}\n**原因**：{friendly}\n\n如有疑问请联系超级管理员"
         else:
-            msg = f"✅ 操作执行成功\n操作：{desc}"
+            card_title = "✅ 操作执行成功"
+            card_color = "green"
+            body = f"**操作**：{desc}"
+        result_card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": card_title},
+                "template": card_color,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            ],
+        }
         try:
             from app.services.feishu_service import FeishuService
-            FeishuService().send_text_message(receive_id, msg, receive_type)
+            FeishuService().send_card_message(receive_id, result_card, receive_type)
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给发起人失败")
@@ -582,24 +597,25 @@ class UserOperationConfirmationService:
         }
         op_event = 事项_map.get(action) or 事项_map.get(op_type, op_type)
 
-        # 操作对象（目标 + 补充说明）
+        # 操作对象（仅目标身份）；变更明细单独成块
+        change_elements: list = []
+
         if action == "create_user":
             ud = details.get("user_data", {})
             op_target = f"{ud.get('name', '')}（{self._role_name(ud.get('role', ''))}）"
         elif action in ("deactivate_user", "delete_user", "activate_user", "update_user"):
             name = details.get("target_name", "")
             role = self._role_name(details.get("target_role", ""))
-            suffix = {
-                "deactivate_user": "，禁用后可恢复",
-                "delete_user":     "，⚠️ 硬删除不可恢复",
-                "activate_user":   "",
-                "update_user":     "",
+            note = {
+                "deactivate_user": "  ·  禁用后可恢复",
+                "activate_user":   "  ·  重新激活",
             }.get(action, "")
+            op_target = f"{name}（{role}）{note}"
+            # 变更明细（仅 update_user）
             changes = details.get("changes", {})
             if changes and action == "update_user":
                 change_parts = []
                 for k, v in changes.items():
-                    # 过滤空值
                     if v is None or v == "":
                         continue
                     label = _USER_FIELD_LABELS.get(k, k)
@@ -609,24 +625,40 @@ class UserOperationConfirmationService:
                         display_v = "启用" if v else "禁用"
                     else:
                         display_v = str(v)
-                    change_parts.append(f"{label} → {display_v}")
-                change_str = "\n".join(f"· {p}" for p in change_parts)
-            else:
-                change_str = ""
-            op_target = f"{name}（{role}{suffix}）" + (f"\n变更内容：\n{change_str}" if change_str else "")
+                    change_parts.append(f"· {label} → {display_v}")
+                if change_parts:
+                    change_elements = [
+                        {"tag": "hr"},
+                        {
+                            "tag": "div",
+                            "text": {
+                                "tag": "lark_md",
+                                "content": "**变更内容**：\n" + "\n".join(change_parts),
+                            },
+                        },
+                    ]
         else:
             acc_name = details.get("data", {}).get("name") or details.get("account_name", "")
             op_target = acc_name or "—"
 
-        lines = [
-            f"申请人：{confirmation.initiator_name}",
-            f"操作事项：{op_event}",
-            f"操作对象：{op_target}",
+        # 危险操作在事项行加醒目标注
+        danger_note = {
+            "delete_user":        " ⚠️（不可恢复）",
+            "delete_reg_account": " ⚠️（不可恢复）",
+            "delete_dns_account": " ⚠️（不可恢复）",
+            "delete_provider":    " ⚠️（不可恢复）",
+        }.get(action, "")
+        op_event_display = op_event + danger_note
+
+        main_lines = [
+            f"**申请人**：{confirmation.initiator_name}",
+            f"**操作事项**：{op_event_display}",
+            f"**操作对象**：{op_target}",
         ]
         if api_key_masked:
-            lines.append(f"API Key：{api_key_masked}")
+            main_lines.append(f"**API Key**：`{api_key_masked}`")
 
-        # 卡片标题
+        # 卡片标题 & 颜色（不可逆操作用红色）
         if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
             card_title = "👤 用户管理授权申请"
         elif op_type in ("add_provider", "update_provider", "delete_provider"):
@@ -634,36 +666,45 @@ class UserOperationConfirmationService:
         else:
             card_title = "🔐 账号配置授权申请"
 
+        _danger_actions = {"delete_user", "delete_reg_account", "delete_dns_account", "delete_provider"}
+        card_color = "red" if action in _danger_actions else "orange"
+
+        elements: list = [
+            {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(main_lines)}},
+        ]
+        elements.extend(change_elements)
+        elements.extend([
+            {"tag": "hr"},
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 授权执行"},
+                        "type": "primary",
+                        "value": {"action": "approve_account_op", "confirmation_id": str(confirmation.id)},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                        "type": "danger",
+                        "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)},
+                    },
+                ],
+            },
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "⏱ 申请有效期 24 小时，逾期自动作废"}],
+            },
+        ])
+
         card = {
             "config": {"wide_screen_mode": True},
             "header": {
                 "title": {"tag": "plain_text", "content": card_title},
-                "template": "orange"
+                "template": card_color,
             },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {"tag": "lark_md", "content": "\n".join(lines)}
-                },
-                {"tag": "hr"},
-                {
-                    "tag": "action",
-                    "actions": [
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "✅ 授权执行"},
-                            "type": "primary",
-                            "value": {"action": "approve_account_op", "confirmation_id": str(confirmation.id)}
-                        },
-                        {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "❌ 拒绝"},
-                            "type": "danger",
-                            "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)}
-                        }
-                    ]
-                }
-            ]
+            "elements": elements,
         }
 
         try:

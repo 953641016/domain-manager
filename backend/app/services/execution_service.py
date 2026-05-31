@@ -265,16 +265,15 @@ class ExecutionService:
         requester = request.requester
         approver = request.approver
 
-        # 业务同事：简化通知（不含失败原因）
+        # 业务同事：简化通知（不含技术细节）
         if requester:
             if success:
                 msg = (f"✅ 您的{type_label}申请已完成\n"
-                       f"域名：{request.domain_name}\n"
-                       f"结果：成功")
+                       f"域名：{request.domain_name}")
             else:
                 msg = (f"❌ 您的{type_label}申请未能完成\n"
                        f"域名：{request.domain_name}\n"
-                       f"如需了解详情，请联系域名专员。")
+                       f"请联系域名专员了解详情并重新提交。")
             self._send(requester, msg)
 
         # 域名专员/审批人：完整信息（含失败原因）
@@ -284,7 +283,20 @@ class ExecutionService:
 
     def _build_specialist_message(self, request: Request, result: Dict[str, Any],
                                   type_label: str, success: bool) -> str:
-        head = f"{'✅' if success else '❌'} {type_label}{'成功' if success else '失败'}"
+        # DNS 可能部分成功，单独标注
+        if request.type != "domain_register":
+            total = result.get("total")
+            sc = result.get("success_count", 0)
+            is_partial = total is not None and sc is not None and 0 < sc < total
+        else:
+            is_partial = False
+        if is_partial:
+            icon, label = "⚠️", "部分成功"
+        elif success:
+            icon, label = "✅", "成功"
+        else:
+            icon, label = "❌", "失败"
+        head = f"{icon} {type_label}{label}"
         lines = [head,
                  f"域名：{request.domain_name}",
                  f"申请人：{request.requester_name}"]
