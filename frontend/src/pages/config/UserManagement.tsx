@@ -5,6 +5,7 @@ import {
 } from '@/api/users';
 import { searchFeishuUsers } from '@/api/feishu';
 import type { FeishuUserInfo } from '@/api/feishu';
+import { QRCodeSVG } from 'qrcode.react';
 import type { User, RoleInfo, UserCreate, UserUpdate } from '@/types/user';
 
 const UserManagement: React.FC = () => {
@@ -535,15 +536,13 @@ const UserManagement: React.FC = () => {
               <p className="text-sm text-gray-600 mb-4">请让新用户用飞书扫描下方二维码</p>
               {qrUrl ? (
                 <div className="flex justify-center mb-4">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`}
-                    alt="飞书扫码添加用户"
-                    className="border border-gray-200 rounded-lg"
-                  />
+                  <div className="border border-gray-200 rounded-lg p-3 bg-white">
+                    <QRCodeSVG value={qrUrl} size={200} level="M" />
+                  </div>
                 </div>
               ) : (
                 <div className="flex justify-center mb-4">
-                  <div className="w-[200px] h-[200px] bg-gray-100 rounded-lg flex items-center-center text-gray-400">加载中...</div>
+                  <div className="w-[200px] h-[200px] bg-gray-100 rounded-lg flex items-center justify-center text-gray-400">加载中...</div>
                 </div>
               )}
               <p className="text-xs text-gray-400">扫码后系统将自动获取用户信息并添加</p>
