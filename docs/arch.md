@@ -1,5 +1,19 @@
 # 域名管家 - 技术架构文档
 
+> ⚠️ **历史设计文档 — 以实际代码为准**
+>
+> 本文档为项目初期的架构设计文档，以下内容与当前实现存在已知偏差：
+>
+> | 偏差项 | 文档内容 | 实际实现 |
+> |--------|---------|---------|
+> | API 路由前缀 | `/api/requests` 等（无 v1） | `/api/v1/requests` 等（全部带 `/v1`） |
+> | 权限示例代码 | `if user.role == 'admin': return True`（admin 全权限） | 查 `permission.py` 的 `ROLE_PERMISSIONS` 矩阵，admin 无业务数据权限 |
+> | `can_direct_register` | 允许 `admin` 直接注册 | admin 为 `False`，仅 `domain_spec`/`super_admin` 为 `True` |
+> | 列表响应格式 | `{items: [...], total, page}` | 直接返回数组 `[...]` |
+> | 认证路径 | `/api/auth/feishu` | `/api/v1/auth/login/feishu` |
+>
+> **修改权限相关逻辑时，请以 `backend/app/models/permission.py` 中的 `ROLE_PERMISSIONS` 为准，不要参考本文档中的示例代码。**
+
 ## 1. Architecture Design
 
 ```mermaid

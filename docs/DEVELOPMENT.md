@@ -70,7 +70,7 @@ FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 SUPER_ADMIN_FEISHU_USERID=ou_xxxxxxxxxxxxxxxx
 
 # JWT 签名密钥（任意随机字符串）
-SECRET_KEY=dev-secret-key-change-in-production
+JWT_SECRET_KEY=dev-secret-key-change-in-production
 
 # 敏感数据加密密钥（运行下方命令生成）
 ENCRYPTION_KEY=
@@ -201,12 +201,16 @@ ngrok http 8000
 # 将生成的 https://xxxx.ngrok.io 配置到飞书应用 Webhook 地址
 ```
 
-**方案 B：直接在测试服务器上开发**
+**方案 B：在服务器上调试（⚠️ 警告：操作的是生产环境）**
+
+> **安全警告**：`115.28.211.155` 是生产服务器，在服务器上直接修改代码将立即影响线上用户。  
+> 根据项目规范，SSH 进生产机需每次得到用户明确授权，且修改后须提交 git 并走正常发布流程。  
+> **仅在紧急情况下使用**，且操作结束后必须将修改同步回 git。
 
 ```bash
-ssh -i /tmp/zj_deploy.pem root@115.28.211.155
+ssh -i ~/.toolchain/zj_deploy.pem root@115.28.211.155
 cd /opt/domain-manager
-# 直接在服务器上改代码，重启容器测试
+# 临时修改代码后，必须提交到 git 并通过 deploy.sh 正式部署
 docker restart domain-manager-backend
 ```
 
