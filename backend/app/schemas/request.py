@@ -31,6 +31,13 @@ class RequestUpdate(BaseModel):
 class RequestApprove(BaseModel):
     """申请审批请求"""
     comment: Optional[str] = Field(None, description="审批意见")
+    # 审批时可选地指定/覆盖注册商与账号（PRD：专员可在审批时修改）
+    selected_registrar_code: Optional[str] = Field(None, description="覆盖注册商代码")
+    selected_reg_account_id: Optional[int] = Field(None, description="覆盖注册账号ID")
+    selected_dns_provider_code: Optional[str] = Field(None, description="覆盖DNS解析商代码")
+    selected_dns_account_id: Optional[int] = Field(None, description="覆盖DNS账号ID")
+    # 是否在审批通过后自动执行（默认true，打通自动化主线）
+    auto_execute: bool = Field(True, description="审批通过后是否自动执行")
 
 
 class RequestReject(BaseModel):

@@ -221,6 +221,21 @@ def approve_request(
     """
     service = RequestService(db)
     try:
+        # 审批时若指定了注册商/解析账号覆盖，先写入申请
+        override = data.model_dump(
+            include={
+                "selected_registrar_code", "selected_reg_account_id",
+                "selected_dns_provider_code", "selected_dns_account_id",
+            },
+            exclude_none=True,
+        )
+        if override:
+            existing = service.get_request(request_id)
+            if existing:
+                for key, value in override.items():
+                    setattr(existing, key, value)
+                db.commit()
+
         request = service.approve_request(
             request_id=request_id,
             approver_id=current_user.id,
@@ -233,6 +248,12 @@ def approve_request(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="申请不存在"
             )
+
+        # 打通主线：审批通过后自动执行（注册/DNS配置）并发送差异化通知
+        if data.auto_execute:
+            from app.services.execution_service import ExecutionService
+            ExecutionService(db).execute_and_notify(request)
+            db.refresh(request)
 
         return RequestResponse.model_validate(request)
     except ValueError as e:
