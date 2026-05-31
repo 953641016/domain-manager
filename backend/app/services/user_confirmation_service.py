@@ -242,6 +242,9 @@ class UserOperationConfirmationService:
 
         # 通知发起人（如实反映执行结果）
         self._notify_initiator(confirmation, approved=True, exec_error=exec_error)
+        # 通知目标用户（账号有实际变动 & 执行成功时才通知）
+        if not exec_error:
+            self._notify_target_user(confirmation)
 
         return confirmation
 
@@ -538,6 +541,135 @@ class UserOperationConfirmationService:
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给发起人失败")
+
+    def _notify_target_user(
+        self,
+        confirmation: UserOperationConfirmation,
+    ) -> None:
+        """
+        批准执行成功后，通知被操作的目标用户账号已变动。
+
+        通知矩阵：
+          update_user（普通）     → 目标用户：✅ 您的账号已更新（绿色）
+          activate_user          → 目标用户：✅ 您的账号已恢复（绿色）
+          超管转让               → 新超管：👑 您已成为超级管理员（红色）
+                                   原超管：⚠️ 您的超管权限已转让（橙色）
+          create_user            → 不通知（账号刚创建，飞书绑定未验证）
+          deactivate_user        → 不通知（账号已禁，实用价值低）
+          delete_user            → 不通知（账号已删，无法触达）
+        """
+        details = confirmation.operation_details or {}
+        action = details.get("action", "")
+
+        if action not in ("update_user", "activate_user"):
+            return
+
+        if action == "activate_user":
+            self._send_target_user_card(
+                user_id=details.get("user_id"),
+                card_title="✅ 您的账号已恢复",
+                card_color="green",
+                body=(
+                    f"**操作人**：{confirmation.initiator_name}\n"
+                    f"**变更内容**：账号已激活，您可以重新登录系统"
+                ),
+            )
+            return
+
+        # update_user
+        if details.get("transfer_super_admin"):
+            new_name = details.get("target_name", "")
+            old_sa_name = details.get("old_super_admin_name", "")
+
+            # 通知被提升为超管的新用户
+            self._send_target_user_card(
+                user_id=details.get("user_id"),
+                card_title="👑 您已成为超级管理员",
+                card_color="red",
+                body=(
+                    f"**操作人**：{confirmation.initiator_name}\n"
+                    f"**变更内容**：\n"
+                    f"· 您已接任超级管理员\n"
+                    f"· 原超管 {old_sa_name} 已降为系统管理员"
+                ),
+            )
+            # 通知被降级的原超管
+            old_sa_id = details.get("old_super_admin_id")
+            if old_sa_id:
+                self._send_target_user_card(
+                    user_id=old_sa_id,
+                    card_title="⚠️ 您的超管权限已转让",
+                    card_color="orange",
+                    body=(
+                        f"**操作人**：{confirmation.initiator_name}\n"
+                        f"**变更内容**：\n"
+                        f"· 超级管理员已转让给 {new_name}\n"
+                        f"· 您的角色已变为系统管理员"
+                    ),
+                )
+        else:
+            # 普通 update_user：过滤空值后仅通知有实质变更的情况
+            changes = details.get("changes", {}) or {}
+            meaningful = {k: v for k, v in changes.items() if v is not None and v != ""}
+            if not meaningful:
+                return
+
+            change_lines = []
+            for k, v in meaningful.items():
+                label = _USER_FIELD_LABELS.get(k, k)
+                if k == "role":
+                    display_v = self._role_name(v)
+                elif k == "is_active":
+                    display_v = "启用" if v else "禁用"
+                else:
+                    display_v = str(v)
+                change_lines.append(f"· {label} → {display_v}")
+
+            self._send_target_user_card(
+                user_id=details.get("user_id"),
+                card_title="✅ 您的账号已更新",
+                card_color="green",
+                body=(
+                    f"**操作人**：{confirmation.initiator_name}\n"
+                    f"**变更内容**：\n" + "\n".join(change_lines)
+                ),
+            )
+
+    def _send_target_user_card(
+        self,
+        user_id: Optional[int],
+        card_title: str,
+        card_color: str,
+        body: str,
+    ) -> None:
+        """向目标用户（被操作者）发送飞书通知卡片（无操作按钮）"""
+        if not user_id:
+            return
+        target = self.db.query(User).filter_by(id=user_id).first()
+        if not target:
+            return
+        receive_id = getattr(target, "feishu_open_id", None) or getattr(target, "feishu_user_id", None)
+        if not receive_id:
+            # 未绑定飞书，静默跳过（不影响主流程）
+            return
+        receive_type = "open_id" if getattr(target, "feishu_open_id", None) else "user_id"
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": card_title},
+                "template": card_color,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            ],
+        }
+        try:
+            from app.services.feishu_service import FeishuService
+            FeishuService().send_card_message(receive_id, card, receive_type)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("发送通知给目标用户失败，user_id=%s", user_id)
 
     def _audit(
         self,
