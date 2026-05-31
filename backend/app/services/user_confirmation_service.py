@@ -366,10 +366,10 @@ class UserOperationConfirmationService:
         return query.all()
 
     def get_user_by_feishu_id(self, feishu_userid: str) -> Optional[User]:
-        """通过飞书用户ID获取用户"""
-        return self.db.query(User).filter_by(
-            feishu_userid=feishu_userid,
-            is_active=True
+        """通过飞书用户ID获取用户（open_id / user_id 均可）"""
+        return self.db.query(User).filter(
+            (User.feishu_user_id == feishu_userid) | (User.feishu_open_id == feishu_userid),
+            User.is_active == True,
         ).first()
 
     # ==================== 执行实际操作 ====================
