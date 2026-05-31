@@ -54,7 +54,6 @@ const MENU: MenuEntry[] = [
     children: [
       { key: 'domains-list', label: '域名列表', path: AppRoutes.DOMAINS, icon: '🌐' },
       { key: 'expiration', label: '到期管理', path: AppRoutes.EXPIRATION, icon: '⏰' },
-      { key: 'ssl', label: 'SSL 证书', path: AppRoutes.SSL, icon: '🔒' },
     ],
   },
   // 系统管理
@@ -69,6 +68,7 @@ const MENU: MenuEntry[] = [
       { key: 'providers', label: '服务商与默认', path: AppRoutes.SYSTEM_PROVIDERS, icon: '🏷️' },
       { key: 'statistics', label: '统计报表', path: AppRoutes.STATISTICS, icon: '📈' },
       { key: 'logs', label: '操作日志', path: AppRoutes.LOGS, icon: '📝' },
+      { key: 'ssl', label: 'SSL 证书', path: AppRoutes.SSL, icon: '🔒' },
     ],
   },
 ];
