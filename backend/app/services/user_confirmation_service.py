@@ -156,16 +156,10 @@ class UserOperationConfirmationService:
         if not confirmation or not confirmation.is_pending:
             return None
 
-        # 检查是否需要超级管理员确认
-        if confirmation.requires_super_admin:
-            # 获取超级管理员用户
-            super_admin = self.get_super_admin()
-            if not super_admin or super_admin.feishu_userid != approver_feishu_userid:
-                # 不是超级管理员，拒绝批准
-                return None
-
-        # 检查是否是自己批准自己发起的操作
-        if confirmation.initiator_user_id == approver_user_id:
+        # 审批人必须是超级管理员（恒定规则，见设计文档3.0带外确认）
+        # 注意：不再有"禁止自批"限制——超管自确认是设计允许的
+        super_admin = self.get_super_admin()
+        if not super_admin or super_admin.id != approver_user_id:
             return None
 
         # 更新状态
@@ -213,16 +207,9 @@ class UserOperationConfirmationService:
         if not confirmation or not confirmation.is_pending:
             return None
 
-        # 检查是否需要超级管理员确认
-        if confirmation.requires_super_admin:
-            # 获取超级管理员用户
-            super_admin = self.get_super_admin()
-            if not super_admin or super_admin.feishu_userid != approver_feishu_userid:
-                # 不是超级管理员，拒绝批准
-                return None
-
-        # 检查是否是自己拒绝自己发起的操作
-        if confirmation.initiator_user_id == approver_user_id:
+        # 拒绝人也必须是超级管理员
+        super_admin = self.get_super_admin()
+        if not super_admin or super_admin.id != approver_user_id:
             return None
 
         # 更新状态
@@ -343,6 +330,36 @@ class UserOperationConfirmationService:
 
         elif op == ConfirmationOperationType.DELETE_DNS_ACCOUNT:
             domain_svc.delete_dns_account(details["account_id"])
+
+        elif op == ConfirmationOperationType.ADD_PROVIDER:
+            self._execute_provider_op("add", details)
+        elif op == ConfirmationOperationType.UPDATE_PROVIDER:
+            self._execute_provider_op("update", details)
+        elif op == ConfirmationOperationType.DELETE_PROVIDER:
+            self._execute_provider_op("delete", details)
+
+    def _execute_provider_op(self, action: str, details: dict) -> None:
+        """执行服务商增改删"""
+        from app.models.domain import Registrar, DnsProvider
+        provider_type = details.get("provider_type")
+        model_cls = Registrar if provider_type == "registrar" else DnsProvider
+
+        if action == "add":
+            data = details.get("data", {})
+            obj = model_cls(**data)
+            self.db.add(obj)
+            self.db.commit()
+        elif action == "update":
+            obj = self.db.query(model_cls).filter_by(id=details["id"]).first()
+            if obj:
+                for k, v in details.get("data", {}).items():
+                    setattr(obj, k, v)
+                self.db.commit()
+        elif action == "delete":
+            obj = self.db.query(model_cls).filter_by(id=details["id"]).first()
+            if obj:
+                self.db.delete(obj)
+                self.db.commit()
 
     def _notify_initiator(self, confirmation: UserOperationConfirmation, approved: bool) -> None:
         """通知发起人操作结果"""

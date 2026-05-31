@@ -26,6 +26,10 @@ class ConfirmationOperationType(str, Enum):
     UPDATE_DNS_ACCOUNT = "update_dns_account"     # 修改解析账号
     DELETE_DNS_ACCOUNT = "delete_dns_account"     # 删除解析账号
     SET_DEFAULT_CONFIG = "set_default_config"     # 设置默认配置
+    # 服务商管理（需超管授权）
+    ADD_PROVIDER = "add_provider"                 # 新增服务商
+    UPDATE_PROVIDER = "update_provider"           # 修改服务商
+    DELETE_PROVIDER = "delete_provider"           # 删除服务商
 
 
 class ConfirmationStatus(str, Enum):

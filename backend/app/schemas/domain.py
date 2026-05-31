@@ -137,3 +137,65 @@ class DnsAccountResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ========== 注册商 ==========
+
+class RegistrarCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    code: str = Field(..., max_length=50, description="小写字母+下划线，如 cloudflare")
+    description: Optional[str] = Field(None, max_length=500)
+    api_endpoint: Optional[str] = Field(None, max_length=255)
+    is_enabled: bool = True
+
+
+class RegistrarUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    api_endpoint: Optional[str] = Field(None, max_length=255)
+    is_enabled: Optional[bool] = None
+
+
+class RegistrarResponse(BaseModel):
+    id: int
+    name: str
+    code: str
+    description: Optional[str] = None
+    api_endpoint: Optional[str] = None
+    is_enabled: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+# ========== DNS解析商 ==========
+
+class DnsProviderCreate(BaseModel):
+    name: str = Field(..., max_length=100)
+    code: str = Field(..., max_length=50, description="小写字母+下划线，如 cloudflare/dnspod")
+    description: Optional[str] = Field(None, max_length=500)
+    api_endpoint: Optional[str] = Field(None, max_length=255)
+    is_enabled: bool = True
+
+
+class DnsProviderUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    api_endpoint: Optional[str] = Field(None, max_length=255)
+    is_enabled: Optional[bool] = None
+
+
+class DnsProviderResponse(BaseModel):
+    id: int
+    name: str
+    code: str
+    description: Optional[str] = None
+    api_endpoint: Optional[str] = None
+    is_enabled: bool
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True

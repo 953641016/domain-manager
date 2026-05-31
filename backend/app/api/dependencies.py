@@ -116,13 +116,27 @@ class RoleChecker:
         return current_user
 
 
-# 预定义的权限检查器
-require_manage_users = PermissionChecker("can_manage_users")
-require_config_accounts = PermissionChecker("can_config_accounts")
-require_approve = PermissionChecker("can_approve")
+# 预定义的权限检查器（对应 permission.py 中的 can_xxx 键名）
+require_manage_users     = PermissionChecker("can_manage_users")
+require_manage_accounts  = PermissionChecker("can_manage_accounts")
+require_view_accounts    = PermissionChecker("can_view_accounts")
+require_manage_providers = PermissionChecker("can_manage_providers")
+require_view_providers   = PermissionChecker("can_view_providers")
+require_manage_defaults  = PermissionChecker("can_manage_defaults")
+require_approve_request  = PermissionChecker("can_approve_request")
+require_view_domains     = PermissionChecker("can_view_domains")
+require_submit_request   = PermissionChecker("can_submit_request")
+require_direct_register  = PermissionChecker("can_direct_register")
+require_view_users       = PermissionChecker("can_view_users")
+require_view_all_requests = PermissionChecker("can_view_all_requests")
 
-# 预定义的角色检查器
-require_admin = RoleChecker(["admin", "super_admin"])
+# 向后兼容别名（旧代码引用，逐步替换）
+require_manage_users_compat = require_manage_users
+require_config_accounts = require_manage_accounts   # 旧名，已废弃
+require_approve = require_approve_request            # 旧名，已废弃
+
+# 预定义的角色检查器（尽量用 PermissionChecker 替代，此处保留作兜底）
+require_admin       = RoleChecker(["admin", "super_admin"])
 require_super_admin = RoleChecker(["super_admin"])
-require_domain_spec = RoleChecker(["domain_spec", "admin", "super_admin"])
+require_domain_spec = RoleChecker(["domain_spec", "super_admin"])
 

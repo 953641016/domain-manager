@@ -167,3 +167,31 @@ class DnsAccount(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
+
+
+class Registrar(Base):
+    """注册商表（可管理，替代硬编码工厂）"""
+    __tablename__ = "registrars"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, comment="注册商名称")
+    code = Column(String(50), nullable=False, unique=True, index=True, comment="注册商代码")
+    description = Column(String(500), nullable=True, comment="描述")
+    api_endpoint = Column(String(255), nullable=True, comment="API端点（可选）")
+    is_enabled = Column(Boolean, default=True, comment="是否启用")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class DnsProvider(Base):
+    """DNS解析商表（可管理，替代硬编码工厂）"""
+    __tablename__ = "dns_providers"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, comment="解析商名称")
+    code = Column(String(50), nullable=False, unique=True, index=True, comment="解析商代码")
+    description = Column(String(500), nullable=True, comment="描述")
+    api_endpoint = Column(String(255), nullable=True, comment="API端点（可选）")
+    is_enabled = Column(Boolean, default=True, comment="是否启用")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
