@@ -7,6 +7,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import get_current_active_user, require_manage_users
 from app.services.domain_service import DomainService
+from app.services.user_confirmation_service import UserOperationConfirmationService
+from app.models.user_confirmation import ConfirmationOperationType
 from app.schemas.domain import (
     DomainCreate, DomainUpdate, DomainResponse, DomainListResponse,
     RegAccountCreate, RegAccountUpdate, RegAccountResponse,
@@ -162,65 +164,96 @@ def get_reg_account(
     return RegAccountResponse.model_validate(account)
 
 
-@router.post("/accounts/reg", response_model=RegAccountResponse, status_code=status.HTTP_201_CREATED)
+def _make_confirmation(
+    db, current_user: User, op_type: ConfirmationOperationType,
+    details: dict, api_key_masked: str = ""
+) -> dict:
+    """域名专员操作：创建 Confirmation 记录并发飞书卡片给超管，返回待审状态"""
+    conf_svc = UserOperationConfirmationService(db)
+    conf = conf_svc.create_confirmation(
+        operation_type=op_type,
+        initiator_user_id=current_user.id,
+        initiator_name=current_user.name,
+        initiator_feishu_userid=getattr(current_user, "feishu_user_id", "") or "",
+        target_user_data={"specialist_id": current_user.id, "specialist_name": current_user.name},
+        operation_details=details,
+        requires_super_admin=True,
+    )
+    conf_svc.send_account_op_card_to_super_admin(conf, api_key_masked=api_key_masked)
+    return {"status": "pending_approval", "confirmation_id": conf.id,
+            "message": "已向超级管理员发送授权申请，请等待审批"}
+
+
+@router.post("/accounts/reg")
 def create_reg_account(
     data: RegAccountCreate,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
     """
     创建注册账号
-
-    需要管理员权限
+    - 管理员/超管：直接创建
+    - 域名专员：发起授权申请，超管通过飞书授权后执行
     """
+    if current_user.role == "domain_spec":
+        masked = ("****" + data.api_key[-4:]) if data.api_key and len(data.api_key) >= 4 else "****"
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.ADD_REG_ACCOUNT,
+            details={"data": data.model_dump(), "owner_id": current_user.id},
+            api_key_masked=masked,
+        )
+    # admin / super_admin 直接写库
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
     service = DomainService(db)
     account = service.create_reg_account(data, owner_id=current_user.id)
     return RegAccountResponse.model_validate(account)
 
 
-@router.put("/accounts/reg/{account_id}", response_model=RegAccountResponse)
+@router.put("/accounts/reg/{account_id}")
 def update_reg_account(
     account_id: int,
     data: RegAccountUpdate,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """
-    更新注册账号
-
-    需要管理员权限
-    """
+    """修改注册账号（域名专员需超管授权）"""
+    if current_user.role == "domain_spec":
+        masked = ("****" + data.api_key[-4:]) if getattr(data, "api_key", None) and len(data.api_key) >= 4 else ""
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.UPDATE_REG_ACCOUNT,
+            details={"account_id": account_id, "data": data.model_dump(exclude_none=True)},
+            api_key_masked=masked,
+        )
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
     service = DomainService(db)
     account = service.update_reg_account(account_id, data)
-
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
-        )
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
     return RegAccountResponse.model_validate(account)
 
 
-@router.delete("/accounts/reg/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/accounts/reg/{account_id}")
 def delete_reg_account(
     account_id: int,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """
-    删除注册账号
-
-    需要管理员权限
-    """
-    service = DomainService(db)
-    success = service.delete_reg_account(account_id)
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
+    """删除注册账号（域名专员需超管授权）"""
+    if current_user.role == "domain_spec":
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.DELETE_REG_ACCOUNT,
+            details={"account_id": account_id},
         )
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+    service = DomainService(db)
+    if not service.delete_reg_account(account_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
 
 
 # ========== DNS账号管理 ==========
@@ -270,62 +303,68 @@ def get_dns_account(
     return DnsAccountResponse.model_validate(account)
 
 
-@router.post("/accounts/dns", response_model=DnsAccountResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/accounts/dns")
 def create_dns_account(
     data: DnsAccountCreate,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """
-    创建DNS账号
-
-    需要管理员权限
-    """
+    """新增解析账号（域名专员需超管授权）"""
+    if current_user.role == "domain_spec":
+        masked = ("****" + data.api_key[-4:]) if data.api_key and len(data.api_key) >= 4 else "****"
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.ADD_DNS_ACCOUNT,
+            details={"data": data.model_dump(), "owner_id": current_user.id},
+            api_key_masked=masked,
+        )
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
     service = DomainService(db)
     account = service.create_dns_account(data, owner_id=current_user.id)
     return DnsAccountResponse.model_validate(account)
 
 
-@router.put("/accounts/dns/{account_id}", response_model=DnsAccountResponse)
+@router.put("/accounts/dns/{account_id}")
 def update_dns_account(
     account_id: int,
     data: DnsAccountUpdate,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """
-    更新DNS账号
-
-    需要管理员权限
-    """
+    """修改解析账号（域名专员需超管授权）"""
+    if current_user.role == "domain_spec":
+        masked = ("****" + data.api_key[-4:]) if getattr(data, "api_key", None) and len(data.api_key) >= 4 else ""
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.UPDATE_DNS_ACCOUNT,
+            details={"account_id": account_id, "data": data.model_dump(exclude_none=True)},
+            api_key_masked=masked,
+        )
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
     service = DomainService(db)
     account = service.update_dns_account(account_id, data)
-
     if not account:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
-        )
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
     return DnsAccountResponse.model_validate(account)
 
 
-@router.delete("/accounts/dns/{account_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/accounts/dns/{account_id}")
 def delete_dns_account(
     account_id: int,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ):
-    """
-    删除DNS账号
-
-    需要管理员权限
-    """
-    service = DomainService(db)
-    success = service.delete_dns_account(account_id)
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="账号不存在"
+    """删除解析账号（域名专员需超管授权）"""
+    if current_user.role == "domain_spec":
+        return _make_confirmation(
+            db, current_user,
+            ConfirmationOperationType.DELETE_DNS_ACCOUNT,
+            details={"account_id": account_id},
         )
+    if current_user.role not in ("admin", "super_admin"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="权限不足")
+    service = DomainService(db)
+    if not service.delete_dns_account(account_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")

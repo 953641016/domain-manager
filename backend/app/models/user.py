@@ -2,8 +2,9 @@
 用户数据模型
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.core.database import Base
 
 
@@ -31,6 +32,10 @@ class User(Base):
     # 权限配置
     role = Column(String(20), nullable=False, default="business", comment="用户角色: business/domain_spec/admin/super_admin")
     permissions = Column(JSON, default=list, comment="自定义权限列表")
+
+    # 归属专员（仅 business 角色使用）
+    # 业务同事归属于哪个域名专员，申请会自动路由给该专员审批
+    assigned_specialist_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="归属域名专员ID")
     
     # 状态
     is_active = Column(Boolean, default=True, comment="是否启用")
@@ -41,6 +46,9 @@ class User(Base):
     
     # 备注
     remark = Column(String(500), nullable=True, comment="备注")
+
+    # 关系
+    assigned_specialist = relationship("User", foreign_keys=[assigned_specialist_id], remote_side="User.id")
 
     def to_dict(self):
         """转换为字典"""
@@ -60,4 +68,5 @@ class User(Base):
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
             "remark": self.remark,
+            "assigned_specialist_id": self.assigned_specialist_id,
         }

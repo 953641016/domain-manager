@@ -178,6 +178,16 @@ class UserOperationConfirmationService:
         self.db.commit()
         self.db.refresh(confirmation)
 
+        # 执行实际操作
+        try:
+            self._execute_approved_action(confirmation)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).exception("执行授权操作失败: %s", e)
+
+        # 通知发起人
+        self._notify_initiator(confirmation, approved=True)
+
         return confirmation
 
     def reject_confirmation(
@@ -225,6 +235,9 @@ class UserOperationConfirmationService:
 
         self.db.commit()
         self.db.refresh(confirmation)
+
+        # 通知发起人
+        self._notify_initiator(confirmation, approved=False)
 
         return confirmation
 
@@ -295,6 +308,144 @@ class UserOperationConfirmationService:
             is_active=True
         ).first()
 
+    # ==================== 执行实际操作 ====================
+
+    def _execute_approved_action(self, confirmation: UserOperationConfirmation) -> None:
+        """审批通过后执行实际的账号操作"""
+        from app.services.domain_service import DomainService
+        from app.schemas.domain import (
+            RegAccountCreate, RegAccountUpdate,
+            DnsAccountCreate, DnsAccountUpdate,
+        )
+
+        op = confirmation.operation_type
+        details = confirmation.operation_details or {}
+        domain_svc = DomainService(self.db)
+
+        if op == ConfirmationOperationType.ADD_REG_ACCOUNT:
+            data = RegAccountCreate(**details["data"])
+            domain_svc.create_reg_account(data, owner_id=details.get("owner_id"))
+
+        elif op == ConfirmationOperationType.UPDATE_REG_ACCOUNT:
+            data = RegAccountUpdate(**details["data"])
+            domain_svc.update_reg_account(details["account_id"], data)
+
+        elif op == ConfirmationOperationType.DELETE_REG_ACCOUNT:
+            domain_svc.delete_reg_account(details["account_id"])
+
+        elif op == ConfirmationOperationType.ADD_DNS_ACCOUNT:
+            data = DnsAccountCreate(**details["data"])
+            domain_svc.create_dns_account(data, owner_id=details.get("owner_id"))
+
+        elif op == ConfirmationOperationType.UPDATE_DNS_ACCOUNT:
+            data = DnsAccountUpdate(**details["data"])
+            domain_svc.update_dns_account(details["account_id"], data)
+
+        elif op == ConfirmationOperationType.DELETE_DNS_ACCOUNT:
+            domain_svc.delete_dns_account(details["account_id"])
+
+    def _notify_initiator(self, confirmation: UserOperationConfirmation, approved: bool) -> None:
+        """通知发起人操作结果"""
+        initiator = self.db.query(User).filter_by(id=confirmation.initiator_user_id).first()
+        if not initiator:
+            return
+        receive_id = getattr(initiator, "feishu_open_id", None) or getattr(initiator, "feishu_user_id", None)
+        if not receive_id:
+            return
+        receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
+        desc = self.format_operation_description(confirmation)
+        if approved:
+            msg = f"✅ 您的操作已获超级管理员授权并执行\n{desc}"
+        else:
+            reason = confirmation.reject_reason or "未说明原因"
+            msg = f"❌ 您的操作申请被拒绝\n{desc}\n拒绝原因：{reason}"
+        try:
+            from app.services.feishu_service import FeishuService
+            FeishuService().send_text_message(receive_id, msg, receive_type)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("发送通知给发起人失败")
+
+    def send_account_op_card_to_super_admin(
+        self,
+        confirmation: UserOperationConfirmation,
+        api_key_masked: str = "",
+    ) -> None:
+        """向超级管理员发送账号操作授权飞书卡片"""
+        super_admin = self.get_super_admin()
+        if not super_admin:
+            return
+        receive_id = getattr(super_admin, "feishu_open_id", None) or getattr(super_admin, "feishu_user_id", None)
+        if not receive_id:
+            return
+        receive_type = "open_id" if getattr(super_admin, "feishu_open_id", None) else "user_id"
+
+        op_labels = {
+            "add_reg_account": "新增注册账号",
+            "update_reg_account": "修改注册账号",
+            "delete_reg_account": "删除注册账号",
+            "add_dns_account": "新增解析账号",
+            "update_dns_account": "修改解析账号",
+            "delete_dns_account": "删除解析账号",
+            "set_default_config": "修改默认配置",
+        }
+        op_label = op_labels.get(confirmation.operation_type, confirmation.operation_type)
+        details = confirmation.operation_details or {}
+        account_name = details.get("data", {}).get("name") or details.get("account_name", "")
+
+        lines = [
+            f"**操作人：** {confirmation.initiator_name}",
+            f"**操作类型：** {op_label}",
+        ]
+        if account_name:
+            lines.append(f"**账号名称：** {account_name}")
+        if api_key_masked:
+            lines.append(f"**API Key：** {api_key_masked}")
+        if details.get("account_id"):
+            lines.append(f"**账号ID：** {details['account_id']}")
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "🔐 账号配置授权申请"},
+                "template": "orange"
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": "\n".join(lines)}
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "✅ 授权执行"},
+                            "type": "primary",
+                            "value": {"action": "approve_account_op", "confirmation_id": str(confirmation.id)}
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                            "type": "danger",
+                            "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)}
+                        }
+                    ]
+                }
+            ]
+        }
+
+        try:
+            from app.services.feishu_service import FeishuService
+            result = FeishuService().send_card_message(receive_id, card, receive_type)
+            msg_id = result.get("data", {}).get("message_id")
+            if msg_id:
+                self.update_feishu_message_id(confirmation.id, msg_id)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("发送授权卡片给超管失败")
+
     def format_operation_description(self, confirmation: UserOperationConfirmation) -> str:
         """格式化操作描述文本（用于显示）"""
         op_type = confirmation.operation_type
@@ -334,5 +485,26 @@ class UserOperationConfirmationService:
 
         elif op_type == ConfirmationOperationType.PERMISSION_CHANGE:
             return f"{prefix}权限变更：{target_data.get('name')}"
+
+        elif op_type == ConfirmationOperationType.ADD_REG_ACCOUNT:
+            return f"{prefix}新增注册账号：{details.get('data', {}).get('name', '')}"
+
+        elif op_type == ConfirmationOperationType.UPDATE_REG_ACCOUNT:
+            return f"{prefix}修改注册账号 ID={details.get('account_id')}"
+
+        elif op_type == ConfirmationOperationType.DELETE_REG_ACCOUNT:
+            return f"{prefix}删除注册账号 ID={details.get('account_id')}"
+
+        elif op_type == ConfirmationOperationType.ADD_DNS_ACCOUNT:
+            return f"{prefix}新增解析账号：{details.get('data', {}).get('name', '')}"
+
+        elif op_type == ConfirmationOperationType.UPDATE_DNS_ACCOUNT:
+            return f"{prefix}修改解析账号 ID={details.get('account_id')}"
+
+        elif op_type == ConfirmationOperationType.DELETE_DNS_ACCOUNT:
+            return f"{prefix}删除解析账号 ID={details.get('account_id')}"
+
+        elif op_type == ConfirmationOperationType.SET_DEFAULT_CONFIG:
+            return f"{prefix}修改系统默认配置"
 
         return f"{prefix}未知操作：{op_type}"

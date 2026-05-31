@@ -141,22 +141,16 @@ async def feishu_webhook(request: Request):
         event_type = request_body.get("header", {}).get("event_type")
         
         if event_type == "im.message.receive_v1":
-            # 处理消息接收事件
             event = request_body.get("event", {})
-            
-            # 调用机器人处理消息
             await feishu_bot.handle_message(event)
-            
-            return {
-                "success": True,
-                "message": "消息已接收"
-            }
-        
+            return {"success": True, "message": "消息已接收"}
+
+        # 处理卡片按钮回调（超管点击授权/拒绝账号操作）
+        if request_body.get("type") == "card" or event_type == "card.action.trigger":
+            return await _handle_card_action(request_body)
+
         # 默认响应
-        return {
-            "success": True,
-            "message": "事件已接收"
-        }
+        return {"success": True, "message": "事件已接收"}
     
     except HTTPException:
         raise
@@ -294,3 +288,58 @@ async def add_user_callback(
 <p>{str(e)}</p>
 </body></html>"""
         return HTMLResponse(content=html)
+
+
+async def _handle_card_action(body: dict) -> dict:
+    """
+    处理飞书卡片按钮回调
+    超管点击"授权执行"或"拒绝"按钮时触发
+    """
+    try:
+        action = body.get("action", {})
+        value = action.get("value", {}) or body.get("event", {}).get("action", {}).get("value", {})
+        operator = body.get("operator", {}) or body.get("event", {}).get("operator", {})
+
+        card_action = value.get("action", "")
+        confirmation_id = value.get("confirmation_id")
+        if not confirmation_id or card_action not in ("approve_account_op", "reject_account_op"):
+            return {"success": True, "message": "非账号授权卡片，忽略"}
+
+        confirmation_id = int(confirmation_id)
+        operator_open_id = operator.get("open_id", "")
+
+        from app.core.database import SessionLocal
+        from app.services.user_confirmation_service import UserOperationConfirmationService
+
+        db = SessionLocal()
+        try:
+            conf_svc = UserOperationConfirmationService(db)
+            approver = conf_svc.get_user_by_feishu_id(operator_open_id)
+            if not approver or approver.role != "super_admin":
+                return {"toast": {"type": "error", "content": "只有超级管理员可以审批此操作"}}
+
+            if card_action == "approve_account_op":
+                result = conf_svc.approve_confirmation(
+                    confirmation_id=confirmation_id,
+                    approver_user_id=approver.id,
+                    approver_name=approver.name,
+                    approver_feishu_userid=operator_open_id,
+                )
+                return {"toast": {"type": "success" if result else "error",
+                                  "content": "已授权执行" if result else "授权失败（已处理或不存在）"}}
+            else:
+                result = conf_svc.reject_confirmation(
+                    confirmation_id=confirmation_id,
+                    approver_user_id=approver.id,
+                    approver_name=approver.name,
+                    approver_feishu_userid=operator_open_id,
+                    reject_reason="超级管理员拒绝",
+                )
+                return {"toast": {"type": "info" if result else "error",
+                                  "content": "已拒绝操作申请" if result else "拒绝失败（已处理或不存在）"}}
+        finally:
+            db.close()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("处理卡片回调失败")
+        return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}

@@ -13,11 +13,19 @@ class ConfirmationOperationType(str, Enum):
     """确认操作类型"""
     ADD_DOMAIN_SPEC = "add_domain_spec"           # 添加域名专员
     UPDATE_DOMAIN_SPEC = "update_domain_spec"     # 更新域名专员
-    UPDATE_USER_ROLE = "update_user_role"        # 更新用户角色
-    ADD_ADMIN = "add_admin"                      # 添加管理员
-    REMOVE_ADMIN = "remove_admin"                # 移除管理员
-    CONFIG_ACCOUNTS = "config_accounts"          # 配置注册商账号
+    UPDATE_USER_ROLE = "update_user_role"         # 更新用户角色
+    ADD_ADMIN = "add_admin"                       # 添加管理员
+    REMOVE_ADMIN = "remove_admin"                 # 移除管理员
+    CONFIG_ACCOUNTS = "config_accounts"           # 配置注册商账号（旧，保留兼容）
     PERMISSION_CHANGE = "permission_change"       # 权限变更
+    # 域名账号管理（专员操作，需超管授权）
+    ADD_REG_ACCOUNT = "add_reg_account"           # 新增注册账号
+    UPDATE_REG_ACCOUNT = "update_reg_account"     # 修改注册账号
+    DELETE_REG_ACCOUNT = "delete_reg_account"     # 删除注册账号
+    ADD_DNS_ACCOUNT = "add_dns_account"           # 新增解析账号
+    UPDATE_DNS_ACCOUNT = "update_dns_account"     # 修改解析账号
+    DELETE_DNS_ACCOUNT = "delete_dns_account"     # 删除解析账号
+    SET_DEFAULT_CONFIG = "set_default_config"     # 设置默认配置
 
 
 class ConfirmationStatus(str, Enum):

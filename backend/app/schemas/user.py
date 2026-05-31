@@ -33,6 +33,7 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     remark: Optional[str] = Field(None, max_length=500)
+    assigned_specialist_id: Optional[int] = Field(None, description="归属域名专员ID（业务同事专用）")
 
 
 # 用户响应模式
@@ -45,6 +46,7 @@ class UserResponse(UserBase):
     created_at: datetime
     updated_at: datetime
     permissions: List[str] = Field(default_factory=list)
+    assigned_specialist_id: Optional[int] = None
 
     class Config:
         from_attributes = True
