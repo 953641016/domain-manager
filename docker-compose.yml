@@ -10,6 +10,7 @@ services:
     volumes:
       - backend_data:/app/data
       - backend_logs:/app/logs
+      - /etc/letsencrypt:/etc/letsencrypt:ro   # SSL证书监控（只读，实际续期由宿主机certbot负责）
     env_file:
       - ./backend/.env
     networks:

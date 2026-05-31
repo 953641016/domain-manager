@@ -50,24 +50,45 @@ class CertificateAlertResponse(BaseModel):
     alert_count: int
 
 
+def _to_cert_info(raw: dict, threshold_days: int) -> dict:
+    """将 ssl_service 的原始字典转换为 API 期望的 CertificateInfo 格式"""
+    not_before = raw.get("not_before")
+    not_after  = raw.get("not_after")
+    days       = raw.get("days_remaining")
+    return {
+        "domain":         raw.get("domain", ""),
+        "issuer":         raw.get("issuer", ""),
+        "valid_from":     not_before.isoformat() if not_before else "",
+        "valid_to":       not_after.isoformat()  if not_after  else "",
+        "days_remaining": days if days is not None else -1,
+        "is_valid":       (days is not None and days > 0),
+        "serial_number":  raw.get("serial_number"),
+        "fingerprint":    raw.get("fingerprint"),
+    }
+
+
 @router.get("/certificates", response_model=CertificateMonitorResponse)
 async def list_certificates(
     threshold_days: int = 30,
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    获取SSL证书监控信息
-
-    返回所有监控的域名证书信息，包括到期天数和状态
+    获取 SSL 证书监控信息（仅限项目运维域名，非业务域名）
+    读取宿主机 /etc/letsencrypt/live/ 下的证书（只读挂载）
+    实际续期由宿主机 certbot 自动完成，此处仅做状态监控
     """
     try:
-        certificates = ssl_service.monitor_certificates(threshold_days)
+        raw_certs = ssl_service.list_all_certificates()
+        certificates = [_to_cert_info(c, threshold_days) for c in raw_certs]
         return CertificateMonitorResponse(
             success=True,
             certificates=certificates,
             total=len(certificates),
-            valid_count=sum(1 for c in certificates if c['is_valid']),
-            expiring_soon_count=sum(1 for c in certificates if c['days_remaining'] <= threshold_days)
+            valid_count=sum(1 for c in certificates if c["is_valid"]),
+            expiring_soon_count=sum(
+                1 for c in certificates
+                if c["is_valid"] and c["days_remaining"] <= threshold_days
+            ),
         )
     except Exception as e:
         raise HTTPException(
@@ -110,11 +131,12 @@ async def check_ssl_health(
     返回SSL证书监控服务的状态
     """
     try:
-        certificates = ssl_service.monitor_certificates(threshold_days=30)
+        raw_certs = ssl_service.list_all_certificates()
+        certs = [_to_cert_info(c, 30) for c in raw_certs]
         return {
             "status": "ok",
-            "monitored_domains": len(certificates),
-            "valid_certificates": sum(1 for c in certificates if c['is_valid'])
+            "monitored_domains": len(certs),
+            "valid_certificates": sum(1 for c in certs if c["is_valid"]),
         }
     except Exception as e:
         raise HTTPException(
