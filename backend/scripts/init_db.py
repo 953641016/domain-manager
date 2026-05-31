@@ -20,6 +20,7 @@ from app.models.dns import DnsRecord
 from app.models.audit import AuditLog
 from app.models.request import Request
 from app.models.system import SystemDefaults  # 确保 system_defaults 表被 create_all 创建
+from sqlalchemy import text
 
 
 def init_db():
@@ -107,8 +108,36 @@ def init_db():
         else:
             print("\n3. 系统管理员用户已存在")
 
+        # ── system_defaults 迁移：单行全局表 → per-user 表 ──────────────────
+        print("\n4. system_defaults 表迁移检查（v1.3.3: 全局→per-user）...")
+        col_rows = db.execute(text("PRAGMA table_info(system_defaults)")).fetchall()
+        existing_cols = [row[1] for row in col_rows]
+
+        if "user_id" not in existing_cols:
+            # 添加 user_id 列（SQLite ALTER TABLE 只支持 ADD COLUMN）
+            db.execute(text(
+                "ALTER TABLE system_defaults ADD COLUMN user_id INTEGER REFERENCES users(id)"
+            ))
+            db.commit()
+            print("   ✓ 已添加 user_id 列")
+
+            # 清理旧全局行（全部 NULL 默认值，无实际意义）
+            db.execute(text("DELETE FROM system_defaults WHERE user_id IS NULL"))
+            db.commit()
+            print("   ✓ 已清理旧全局行")
+        else:
+            print("   - user_id 列已存在，跳过")
+
+        # 创建唯一索引（SQLite 不支持 CREATE UNIQUE INDEX 在 ALTER 时附加，需单独建）
+        db.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "ix_system_defaults_user_id ON system_defaults(user_id)"
+        ))
+        db.commit()
+        print("   ✓ user_id 唯一索引已就绪")
+
         # 初始化注册商数据（已实现适配器的服务商）
-        print("\n4. 初始化注册商与DNS服务商数据...")
+        print("\n5. 初始化注册商与DNS服务商数据...")
         DEFAULT_REGISTRARS = [
             {"code": "cloudflare", "name": "Cloudflare", "description": "Cloudflare 域名注册（同时支持 DNS 解析）"},
             {"code": "godaddy",    "name": "GoDaddy",    "description": "GoDaddy 域名注册"},
@@ -131,12 +160,12 @@ def init_db():
         db.commit()
 
         # 显示所有角色信息
-        print("\n5. 可用角色列表:")
+        print("\n6. 可用角色列表:")
         for role_code, role_info in ROLE_PERMISSIONS.items():
             print(f"   - {role_code}: {role_info['name']} ({role_info['description']})")
 
         # 显示当前用户统计
-        print("\n6. 当前用户统计:")
+        print("\n7. 当前用户统计:")
         total_users = db.query(User).count()
         active_users = db.query(User).filter(User.is_active == True).count()
         print(f"   - 总用户数: {total_users}")

@@ -12,6 +12,22 @@
 
 ---
 
+## [1.3.3] — 2026-05-31
+
+### 新增
+- **默认配置 per-user 化**：`SystemDefaults` 表由单行全局设计改为每位专员一行，每人维护独立的注册商/DNS/账号偏好
+- 超管在「默认配置」页面可查看全体专员的当前默认配置（表格形式），并可逐行点击「编辑」替该专员设置默认值
+- domain_spec 仍看到自己的默认配置表单，账号下拉只展示自己名下的账号
+- 超管编辑弹窗中的注册账号/DNS 账号下拉按该专员 `owner_id` 过滤，不会混入其他人的账号
+
+### 技术
+- `backend/app/models/system.py`：`SystemDefaults` 添加 `user_id` FK + `UniqueConstraint`，支持 per-user 唯一行
+- `backend/scripts/init_db.py`：新增迁移步骤（PRAGMA table_info 检测 → ALTER TABLE ADD COLUMN → 清理旧全局行 → CREATE UNIQUE INDEX IF NOT EXISTS）
+- `backend/app/api/v1/config.py`：新增 `GET /config/defaults/all`（超管专属，返回所有专员+其默认配置数组）、`PUT /config/defaults/{uid}`（超管替他人设置，飞书确认）
+- 所有默认配置变更走 `ConfirmationOperationType.SET_DEFAULT_CONFIG` 飞书确认通道，返回 `pending_approval`
+
+---
+
 ## [1.3.2] — 2026-05-31
 
 ### 新增

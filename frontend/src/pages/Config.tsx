@@ -74,6 +74,17 @@ interface DefaultConfig {
   default_dns_account_id: number | null;
 }
 
+/** 超管"所有专员默认配置"列表中的单行 */
+interface UserDefaultsItem {
+  user_id: number;
+  user_name: string;
+  user_role: string;
+  default_registrar: string | null;
+  default_dns_provider: string | null;
+  default_reg_account_id: number | null;
+  default_dns_account_id: number | null;
+}
+
 /** 用于"归属专员"下拉的精简用户信息 */
 interface SpecialistOption {
   id: number;
@@ -135,13 +146,24 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const [specialists, setSpecialists] = useState<SpecialistOption[]>([]);
 
   // ========== 默认配置 ==========
+  // domain_spec：只看/改自己的默认配置
   const [defaultConfig, setDefaultConfig] = useState<DefaultConfig>({
     default_registrar: '',
     default_dns_provider: '',
     default_reg_account_id: null,
     default_dns_account_id: null,
   });
+  // super_admin：所有专员的默认配置列表
+  const [allDefaults, setAllDefaults] = useState<UserDefaultsItem[]>([]);
   const [defaultsLoading, setDefaultsLoading] = useState(false);
+  // super_admin 编辑某专员的默认配置弹窗
+  const [editingDefaultsFor, setEditingDefaultsFor] = useState<UserDefaultsItem | null>(null);
+  const [defaultsEditForm, setDefaultsEditForm] = useState<DefaultConfig>({
+    default_registrar: '',
+    default_dns_provider: '',
+    default_reg_account_id: null,
+    default_dns_account_id: null,
+  });
 
   // ========== 注册商 CRUD 模态框 ==========
   const [showRegistrarModal, setShowRegistrarModal] = useState(false);
@@ -387,8 +409,29 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const loadDefaults = async () => {
     setDefaultsLoading(true);
     try {
-      const res = await api.get('/config/defaults');
-      setDefaultConfig(res.data);
+      if (isSuperAdmin) {
+        // 超管：加载所有专员的默认配置列表 + 自己的（表单用）
+        const [allRes, myRes] = await Promise.all([
+          api.get('/config/defaults/all'),
+          api.get('/config/defaults'),
+        ]);
+        setAllDefaults(Array.isArray(allRes.data) ? allRes.data : []);
+        setDefaultConfig({
+          default_registrar: myRes.data?.default_registrar || '',
+          default_dns_provider: myRes.data?.default_dns_provider || '',
+          default_reg_account_id: myRes.data?.default_reg_account_id ?? null,
+          default_dns_account_id: myRes.data?.default_dns_account_id ?? null,
+        });
+      } else {
+        // domain_spec：只加载自己的
+        const res = await api.get('/config/defaults');
+        setDefaultConfig({
+          default_registrar: res.data?.default_registrar || '',
+          default_dns_provider: res.data?.default_dns_provider || '',
+          default_reg_account_id: res.data?.default_reg_account_id ?? null,
+          default_dns_account_id: res.data?.default_dns_account_id ?? null,
+        });
+      }
     } catch (err) {
       console.error('获取默认配置失败:', err);
     } finally {
@@ -396,10 +439,43 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     }
   };
 
+  /** domain_spec / super_admin 自己的默认配置提交 */
   const handleSaveDefaults = async () => {
     try {
       const res = await api.put('/config/defaults', defaultConfig);
       alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+    } catch (err: any) {
+      alert('保存失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  /** 超管打开"替某专员设置默认配置"弹窗 */
+  const openEditDefaultsModal = (item: UserDefaultsItem) => {
+    setEditingDefaultsFor(item);
+    setDefaultsEditForm({
+      default_registrar: item.default_registrar || '',
+      default_dns_provider: item.default_dns_provider || '',
+      default_reg_account_id: item.default_reg_account_id,
+      default_dns_account_id: item.default_dns_account_id,
+    });
+  };
+
+  const closeEditDefaultsModal = () => {
+    setEditingDefaultsFor(null);
+    setDefaultsEditForm({ default_registrar: '', default_dns_provider: '', default_reg_account_id: null, default_dns_account_id: null });
+  };
+
+  /** 超管替某专员保存默认配置 */
+  const handleSaveUserDefaults = async () => {
+    if (!editingDefaultsFor) return;
+    try {
+      const isSelf = editingDefaultsFor.user_id === currentUser.id;
+      const res = isSelf
+        ? await api.put('/config/defaults', defaultsEditForm)
+        : await api.put(`/config/defaults/${editingDefaultsFor.user_id}`, defaultsEditForm);
+      alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      closeEditDefaultsModal();
+      loadDefaults();
     } catch (err: any) {
       alert('保存失败: ' + (err.response?.data?.detail || err.message));
     }
@@ -1109,50 +1185,228 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
           {activeTab === 'defaults' && (
             <div className="space-y-6">
               <h2 className="text-lg font-semibold">默认配置</h2>
+              <p className="text-sm text-gray-500">
+                默认配置仅作为新建域名时的初始建议值，申请人可在提交时手动选择覆盖。修改需超管飞书确认。
+              </p>
+
               {defaultsLoading ? (
                 <div className="text-center py-12 text-gray-500">加载中...</div>
+              ) : isSuperAdmin ? (
+                /* ── 超管视图：所有专员的默认配置表格 ── */
+                <div className="space-y-4">
+                  <p className="text-sm text-blue-600 bg-blue-50 border border-blue-100 rounded-lg px-4 py-2">
+                    点击各专员右侧的「编辑」按钮，可替该专员设置其新建域名时的默认注册商/账号偏好。
+                  </p>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">专员</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">角色</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">默认注册商</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">默认DNS服务商</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">默认注册账号</th>
+                          <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">默认DNS账号</th>
+                          <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {allDefaults.map((item) => {
+                          const ownRegAcc = regAccounts.find((a) => a.id === item.default_reg_account_id);
+                          const ownDnsAcc = dnsAccounts.find((a) => a.id === item.default_dns_account_id);
+                          return (
+                            <tr key={item.user_id} className={`hover:bg-gray-50 ${item.user_id === currentUser.id ? 'bg-blue-50/40' : ''}`}>
+                              <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                                {item.user_name}
+                                {item.user_id === currentUser.id && (
+                                  <span className="ml-1 text-xs text-blue-500">（自己）</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 text-xs text-gray-500">
+                                {item.user_role === 'super_admin' ? '超管' : '域名专员'}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {item.default_registrar ? findRegistrarName(item.default_registrar) : <span className="text-gray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {item.default_dns_provider ? findDnsProviderName(item.default_dns_provider) : <span className="text-gray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {ownRegAcc ? ownRegAcc.name : <span className="text-gray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-sm text-gray-600">
+                                {ownDnsAcc ? ownDnsAcc.name : <span className="text-gray-300">—</span>}
+                              </td>
+                              <td className="px-4 py-3 text-right">
+                                <button
+                                  onClick={() => openEditDefaultsModal(item)}
+                                  className="text-blue-600 hover:text-blue-800 text-sm"
+                                >
+                                  编辑
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {allDefaults.length === 0 && (
+                          <tr>
+                            <td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">
+                              暂无专员数据
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* 超管编辑某专员默认配置的弹窗 */}
+                  {editingDefaultsFor && (
+                    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                      <div className="bg-white rounded-lg w-full max-w-lg">
+                        <div className="flex justify-between items-center p-6 border-b border-gray-200">
+                          <div>
+                            <h3 className="text-lg font-medium text-gray-900">
+                              编辑默认配置
+                            </h3>
+                            <p className="text-sm text-gray-500 mt-0.5">
+                              专员：{editingDefaultsFor.user_name}
+                              （{editingDefaultsFor.user_role === 'super_admin' ? '超管' : '域名专员'}）
+                            </p>
+                          </div>
+                          <button onClick={closeEditDefaultsModal} className="text-gray-400 hover:text-gray-600">关闭</button>
+                        </div>
+                        <div className="p-6 space-y-4">
+                          {/* 注册商 */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">默认注册商</label>
+                            <select
+                              value={defaultsEditForm.default_registrar}
+                              onChange={(e) => setDefaultsEditForm({ ...defaultsEditForm, default_registrar: e.target.value })}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                            >
+                              <option value="">不指定</option>
+                              {registrars.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+                            </select>
+                          </div>
+                          {/* DNS 服务商 */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">默认 DNS 服务商</label>
+                            <select
+                              value={defaultsEditForm.default_dns_provider}
+                              onChange={(e) => setDefaultsEditForm({ ...defaultsEditForm, default_dns_provider: e.target.value })}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                            >
+                              <option value="">不指定</option>
+                              {dnsProviders.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
+                            </select>
+                          </div>
+                          {/* 注册账号：仅显示该专员名下的账号 */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">默认注册账号</label>
+                            <select
+                              value={defaultsEditForm.default_reg_account_id ?? ''}
+                              onChange={(e) => setDefaultsEditForm({ ...defaultsEditForm, default_reg_account_id: e.target.value ? Number(e.target.value) : null })}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                            >
+                              <option value="">不指定（可选）</option>
+                              {regAccounts
+                                .filter((a) => a.owner_id === editingDefaultsFor.user_id)
+                                .map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}（{findRegistrarName(a.registrar_code)}）
+                                  </option>
+                                ))}
+                            </select>
+                            {regAccounts.filter((a) => a.owner_id === editingDefaultsFor.user_id).length === 0 && (
+                              <p className="text-xs text-gray-400 mt-1">该专员名下暂无注册账号</p>
+                            )}
+                          </div>
+                          {/* DNS 账号：仅显示该专员名下的账号 */}
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">默认 DNS 账号</label>
+                            <select
+                              value={defaultsEditForm.default_dns_account_id ?? ''}
+                              onChange={(e) => setDefaultsEditForm({ ...defaultsEditForm, default_dns_account_id: e.target.value ? Number(e.target.value) : null })}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                            >
+                              <option value="">不指定（可选）</option>
+                              {dnsAccounts
+                                .filter((a) => a.owner_id === editingDefaultsFor.user_id)
+                                .map((a) => (
+                                  <option key={a.id} value={a.id}>
+                                    {a.name}（{findDnsProviderName(a.provider_code)}）
+                                  </option>
+                                ))}
+                            </select>
+                            {dnsAccounts.filter((a) => a.owner_id === editingDefaultsFor.user_id).length === 0 && (
+                              <p className="text-xs text-gray-400 mt-1">该专员名下暂无 DNS 账号</p>
+                            )}
+                          </div>
+                          <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-700">
+                            提交后将发送飞书确认给超级管理员，审批通过后生效。
+                          </div>
+                        </div>
+                        <div className="flex justify-end space-x-3 p-6 border-t border-gray-200">
+                          <button onClick={closeEditDefaultsModal} className="px-4 py-2 text-gray-700 border border-gray-300 rounded-lg">取消</button>
+                          <button onClick={handleSaveUserDefaults} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+                            提交申请
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
               ) : (
+                /* ── domain_spec 视图：仅自己的默认配置表单 ── */
                 <div className="max-w-xl space-y-4">
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认注册商</label>
-                    <select value={defaultConfig.default_registrar}
+                    <select
+                      value={defaultConfig.default_registrar}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_registrar: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                      <option value="">请选择</option>
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">不指定</option>
                       {registrars.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS服务商</label>
-                    <select value={defaultConfig.default_dns_provider}
+                    <label className="block text-sm font-medium text-gray-700 mb-1">默认 DNS 服务商</label>
+                    <select
+                      value={defaultConfig.default_dns_provider}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_dns_provider: e.target.value })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
-                      <option value="">请选择</option>
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">不指定</option>
                       {dnsProviders.map((p) => <option key={p.code} value={p.code}>{p.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">默认注册账号</label>
-                    <select value={defaultConfig.default_reg_account_id ?? ''}
+                    <select
+                      value={defaultConfig.default_reg_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_reg_account_id: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
                       <option value="">不指定（可选）</option>
                       {regAccounts.map((a) => (
                         <option key={a.id} value={a.id}>
-                          {a.name}（{findRegistrarName(a.registrar_code)}）{isSuperAdmin && a.owner_name ? ` — ${a.owner_name}` : ''}
+                          {a.name}（{findRegistrarName(a.registrar_code)}）
                         </option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">默认DNS账号</label>
-                    <select value={defaultConfig.default_dns_account_id ?? ''}
+                    <label className="block text-sm font-medium text-gray-700 mb-1">默认 DNS 账号</label>
+                    <select
+                      value={defaultConfig.default_dns_account_id ?? ''}
                       onChange={(e) => setDefaultConfig({ ...defaultConfig, default_dns_account_id: e.target.value ? Number(e.target.value) : null })}
-                      className="w-full border border-gray-300 rounded-lg px-3 py-2">
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
                       <option value="">不指定（可选）</option>
                       {dnsAccounts.map((a) => (
                         <option key={a.id} value={a.id}>
-                          {a.name}（{findDnsProviderName(a.provider_code)}）{isSuperAdmin && a.owner_name ? ` — ${a.owner_name}` : ''}
+                          {a.name}（{findDnsProviderName(a.provider_code)}）
                         </option>
                       ))}
                     </select>
@@ -1161,9 +1415,6 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                     <button onClick={handleSaveDefaults} className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
                       提交申请
                     </button>
-                  </div>
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-700">
-                    默认配置仅作为新建域名时的初始建议值，申请人可在提交时手动选择覆盖。
                   </div>
                 </div>
               )}
