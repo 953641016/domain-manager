@@ -242,3 +242,35 @@ git commit -m "描述"
 git push origin main
 # 然后 SSH 到服务器执行 deploy.sh
 ```
+
+---
+
+## 10. 开发规范自查清单
+
+提交 PR / 推送前，逐条确认：
+
+### 权限与安全
+
+- [ ] 新增写操作路由是否带 `Depends(require_xxx)` 鉴权？
+- [ ] 涉及注册商账号、服务商配置、用户角色变更的操作，是否调用了超管飞书确认？
+- [ ] 前端是否正确处理了 `{status: "pending_approval"}` 响应（不以"成功"误导用户）？
+- [ ] 有无硬编码 API Key / Secret（应在 `.env` 中）？
+
+### 数据库
+
+- [ ] 新增 ORM 模型是否已 import 到 `init_db.py`，确保 `create_all()` 能建表？
+- [ ] 有枚举性质的初始数据（服务商类型等）是否以幂等方式写入 `init_db.py`？
+- [ ] 有无破坏性字段变更（DROP/改类型/去非空）？如有，是否评估了生产数据影响？
+
+### 前端
+
+- [ ] API 调用是否经由 `src/api/index.ts` 的 `api` 实例？
+- [ ] 列表接口解析是否用 `Array.isArray(res.data) ? res.data : []` 保护？
+- [ ] CRUD 页面是否包含：加载状态、删除二次确认、错误提示？
+
+### 文档
+
+- [ ] `docs/CHANGELOG.md` 的 `[未发布]` 段落是否已追加本次变更？
+- [ ] 如新增 API 路由，是否在路由文件顶部注释了权限要求和返回格式？
+
+> 完整规范见项目根目录 [CLAUDE.md](../CLAUDE.md)。
