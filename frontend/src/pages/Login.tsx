@@ -35,7 +35,7 @@ export default function LoginPage() {
 
   const fetchOAuthUrl = async () => {
     try {
-      const redirectUri = `${window.location.origin}/dm/api/v1/auth/callback`;
+      const redirectUri = `${window.location.origin}/dm/api/auth/callback`;
       const response = await api.get('/auth/oauth-url', {
         params: { redirect_uri: redirectUri }
       });
@@ -46,34 +46,13 @@ export default function LoginPage() {
     }
   };
 
-  const handleLogin = async () => {
-    setLoading(true);
-    setError('');
-
-    try {
-      // 在实际实现中，这里应该打开飞书OAuth页面
-      // 由于需要弹出飞书登录窗口，这里使用模拟登录
-      const code = prompt('请输入测试授权码（实际应使用飞书OAuth）:');
-      if (!code) {
-        setLoading(false);
-        return;
-      }
-
-      const response = await api.post('/auth/login', { code });
-      const { access_token, user } = response.data;
-
-      // 存储token和用户信息
-      localStorage.setItem('access_token', access_token);
-      localStorage.setItem('user', JSON.stringify(user));
-
-      // 跳转到仪表盘
-      navigate('/dashboard');
-    } catch (err: any) {
-      console.error('登录失败:', err);
-      setError(err.response?.data?.detail || '登录失败，请稍后重试');
-    } finally {
-      setLoading(false);
+  const handleLogin = () => {
+    if (!oauthUrl) {
+      setError('获取登录链接失败');
+      return;
     }
+    // 直接跳转到飞书OAuth授权页面
+    window.location.href = oauthUrl;
   };
 
   return (

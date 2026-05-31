@@ -19,9 +19,11 @@ import RequestDetailPage from '@/pages/Requests/Detail';
 import DomainsPage from '@/pages/Domains';
 import DomainDetailPage from '@/pages/Domains/Detail';
 import ExpirationPage from '@/pages/Expiration';
+import SslPage from '@/pages/Ssl';
 import StatisticsPage from '@/pages/Statistics';
 import LogsPage from '@/pages/Logs';
 import ConfigPage from '@/pages/Config';
+import UserManagement from '@/pages/config/UserManagement';
 import ForbiddenPage from '@/pages/Errors/Forbidden';
 import NotFoundPage from '@/pages/Errors/NotFound';
 
@@ -59,11 +61,11 @@ function AppRouter() {
           <Route path="requests" element={<RequestsPage />} />
           <Route path="requests/:id" element={<RequestDetailPage />} />
 
-          {/* 域名管理 - 域名专员和管理员可见 */}
+          {/* 域名管理 - 超级管理员、管理员和域名专员可见 */}
           <Route
             path="domains"
             element={
-              <PermissionRoute allowedRoles={[UserRole.DOMAIN_SPEC, UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
                 <DomainsPage />
               </PermissionRoute>
             }
@@ -71,51 +73,83 @@ function AppRouter() {
           <Route
             path="domains/:name"
             element={
-              <PermissionRoute allowedRoles={[UserRole.DOMAIN_SPEC, UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
                 <DomainDetailPage />
               </PermissionRoute>
             }
           />
 
-          {/* 到期管理 - 域名专员和管理员可见 */}
+          {/* 到期管理 - 超级管理员、管理员和域名专员可见 */}
           <Route
             path="expiration"
             element={
-              <PermissionRoute allowedRoles={[UserRole.DOMAIN_SPEC, UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
                 <ExpirationPage />
               </PermissionRoute>
             }
           />
 
-          {/* 统计报表 - 仅管理员可见 */}
+          {/* SSL 证书 - 超级管理员、管理员和域名专员可见 */}
+          <Route
+            path="ssl"
+            element={
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
+                <SslPage />
+              </PermissionRoute>
+            }
+          />
+
+          {/* 统计报表 - 超级管理员和管理员可见 */}
           <Route
             path="statistics"
             element={
-              <PermissionRoute allowedRoles={[UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
                 <StatisticsPage />
               </PermissionRoute>
             }
           />
 
-          {/* 操作日志 - 仅管理员可见 */}
+          {/* 操作日志 - 超级管理员和管理员可见 */}
           <Route
             path="logs"
             element={
-              <PermissionRoute allowedRoles={[UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
                 <LogsPage />
               </PermissionRoute>
             }
           />
 
-          {/* 系统配置 - 仅管理员可见 */}
+          {/* ==================== 系统管理 - 超级管理员和管理员可见 ==================== */}
+          {/* 用户管理 */}
           <Route
-            path="config"
+            path="system/users"
             element={
-              <PermissionRoute allowedRoles={[UserRole.ADMIN]}>
-                <ConfigPage />
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
+                <UserManagement />
               </PermissionRoute>
             }
           />
+          {/* 账号管理（注册账号 + DNS账号） */}
+          <Route
+            path="system/accounts"
+            element={
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
+                <ConfigPage sections={['reg-accounts', 'dns-accounts']} title="账号管理" />
+              </PermissionRoute>
+            }
+          />
+          {/* 服务商与默认（注册商 + DNS服务商 + 默认配置） */}
+          <Route
+            path="system/providers"
+            element={
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
+                <ConfigPage sections={['registrar', 'dns', 'defaults']} title="服务商与默认" />
+              </PermissionRoute>
+            }
+          />
+
+          {/* 旧版系统配置入口，重定向到用户管理 */}
+          <Route path="config" element={<Navigate to="/system/users" replace />} />
         </Route>
 
         {/* 错误页面 */}

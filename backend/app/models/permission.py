@@ -6,7 +6,7 @@ from app.config import Config
 
 ROLE_PERMISSIONS = {
     "business": {
-        "name": "业务同事",
+        "name": "业务人员",
         "description": "普通业务人员，可提交域名申请",
         "role_level": 0,
         "can_submit_register": True,

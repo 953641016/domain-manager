@@ -112,7 +112,7 @@ def create_user(
     """
     service = UserService(db)
     try:
-        user = service.create_user(user_in)
+        user, needs_confirmation = service.create_user(user_in)
         return user
     except ValueError as e:
         raise HTTPException(
@@ -133,7 +133,7 @@ def update_user(
     需要用户管理权限
     """
     service = UserService(db)
-    user = service.update_user(user_id, user_in)
+    user, needs_confirmation, change_details = service.update_user(user_id, user_in)
 
     if not user:
         raise HTTPException(

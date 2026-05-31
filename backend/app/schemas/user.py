@@ -19,9 +19,9 @@ class UserBase(BaseModel):
 
 # 创建用户模式
 class UserCreate(UserBase):
-    feishu_userid: str = Field(..., min_length=1, max_length=100, description="飞书用户ID")
-    feishu_unionid: Optional[str] = Field(None, max_length=100, description="飞书UnionID")
-    feishu_openid: Optional[str] = Field(None, max_length=100, description="飞书OpenID")
+    feishu_userid: str = Field(..., min_length=1, max_length=100, description="飞书用户ID", alias="feishu_user_id")
+    feishu_unionid: Optional[str] = Field(None, max_length=100, description="飞书UnionID", alias="feishu_union_id")
+    feishu_openid: Optional[str] = Field(None, max_length=100, description="飞书OpenID", alias="feishu_open_id")
 
 
 # 更新用户模式
@@ -38,9 +38,9 @@ class UserUpdate(BaseModel):
 # 用户响应模式
 class UserResponse(UserBase):
     id: int
-    feishu_userid: str
-    feishu_unionid: Optional[str]
-    feishu_openid: Optional[str]
+    feishu_userid: str = Field(alias="feishu_user_id")
+    feishu_unionid: Optional[str] = Field(None, alias="feishu_union_id")
+    feishu_openid: Optional[str] = Field(None, alias="feishu_open_id")
     is_active: bool
     created_at: datetime
     updated_at: datetime
@@ -48,6 +48,7 @@ class UserResponse(UserBase):
 
     class Config:
         from_attributes = True
+        populate_by_name = True
 
 
 # 用户列表响应

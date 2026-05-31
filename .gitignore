@@ -72,3 +72,9 @@ query_dnspod_domain_id.py
 scripts/install_docker.sh
 scripts/setup_docker_mirror.sh
 scripts/setup_server.sh
+
+# 临时构建/调试脚本与产物
+remote_*.sh
+fix_docker.sh
+check_user.py
+*.tar.gz

@@ -2,6 +2,7 @@
 认证服务模块
 处理飞书OAuth登录、JWT令牌生成和验证
 """
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
@@ -9,6 +10,8 @@ from app.models.user import User
 from app.services.feishu_service import feishu_service
 from app.core.security import create_access_token, decode_access_token
 from app.config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -50,6 +53,8 @@ class AuthService:
 
         if not feishu_user_id:
             raise Exception("无法获取飞书用户ID")
+
+        logger.info(f"飞书用户登录: name={name}, feishu_user_id={feishu_user_id}, open_id={feishu_open_id}, union_id={feishu_union_id}")
 
         # 2. 查找或创建本地用户
         user = self.db.query(User).filter(

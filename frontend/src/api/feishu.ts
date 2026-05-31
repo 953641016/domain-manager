@@ -87,3 +87,16 @@ export async function sendFeishuCard(
   });
   return response.data;
 }
+
+/**
+ * 按姓名搜索飞书用户
+ */
+export async function searchFeishuUsers(keyword: string): Promise<{
+  success: boolean;
+  users: FeishuUserInfo[];
+}> {
+  const response = await api.get('/feishu/search-users', {
+    params: { keyword }
+  });
+  return response.data;
+}

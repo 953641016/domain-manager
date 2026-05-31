@@ -46,8 +46,9 @@
 1. 找到 **重定向URL** 配置项
 2. 添加您的系统域名：
    ```
-   https://d.fwxg.com/api/v1/auth/feishu/callback
+   https://d.fwxg.com/dm/api/auth/callback
    ```
+   **注意**：路径中不包含 `v1`，因为 Nginx rewrite 规则会自动将 `/dm/api/` 转换为 `/api/v1/`。
    *(如果本地调试，也可以添加 `http://localhost:3000`)*
 
 ### 1.5 配置IP白名单（安全防护）

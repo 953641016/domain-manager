@@ -24,7 +24,7 @@ class UserService:
         """
         根据飞书用户ID获取用户
         """
-        return self.db.query(User).filter(User.feishu_userid == feishu_userid).first()
+        return self.db.query(User).filter(User.feishu_user_id == feishu_userid).first()
 
     def get_users(
         self,
@@ -47,7 +47,7 @@ class UserService:
             query = query.filter(
                 (User.name.contains(search)) |
                 (User.email.contains(search)) |
-                (User.feishu_userid.contains(search))
+                (User.feishu_user_id.contains(search))
             )
 
         return query.order_by(User.created_at.desc()).offset(skip).limit(limit).all()
@@ -71,7 +71,7 @@ class UserService:
             query = query.filter(
                 (User.name.contains(search)) |
                 (User.email.contains(search)) |
-                (User.feishu_userid.contains(search))
+                (User.feishu_user_id.contains(search))
             )
 
         return query.scalar() or 0
@@ -101,9 +101,9 @@ class UserService:
             email=user_in.email,
             phone=user_in.phone,
             department=user_in.department,
-            feishu_userid=user_in.feishu_userid,
-            feishu_unionid=user_in.feishu_unionid,
-            feishu_openid=user_in.feishu_openid,
+            feishu_user_id=user_in.feishu_userid,
+            feishu_union_id=user_in.feishu_unionid,
+            feishu_open_id=user_in.feishu_openid,
             role=user_in.role,
             permissions=permission_list,
             remark=user_in.remark,

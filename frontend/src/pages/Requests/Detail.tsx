@@ -78,7 +78,7 @@ export default function RequestDetailPage() {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('zh-CN');
+    return new Date(dateStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
   };
 
   const getStatusBadge = (status: string) => {
@@ -208,7 +208,7 @@ export default function RequestDetailPage() {
       </div>
 
       {showRejectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <h3 className="text-lg font-semibold mb-4">拒绝申请</h3>
             <div className="mb-4">

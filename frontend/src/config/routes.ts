@@ -42,20 +42,23 @@ export const AppRoutes = {
   // 到期管理
   EXPIRATION: '/expiration',
 
-  // 系统配置
-  CONFIG: '/config',
-  CONFIG_REGISTRARS: '/config/registrars',
-  CONFIG_DNS_PROVIDERS: '/config/dns-providers',
-  CONFIG_REG_ACCOUNTS: '/config/reg-accounts',
-  CONFIG_DNS_ACCOUNTS: '/config/dns-accounts',
-  CONFIG_DEFAULTS: '/config/defaults',
-  CONFIG_USERS: '/config/users',
+  // SSL 证书
+  SSL: '/ssl',
+
+  // 系统管理（分组）
+  SYSTEM: '/system',
+  SYSTEM_USERS: '/system/users',
+  SYSTEM_ACCOUNTS: '/system/accounts',
+  SYSTEM_PROVIDERS: '/system/providers',
 
   // 统计报表
   STATISTICS: '/statistics',
 
   // 操作日志
   LOGS: '/logs',
+
+  // 旧版系统配置入口（保留以兼容旧链接，重定向到系统管理）
+  CONFIG: '/config',
 
   // 403 无权限页面
   FORBIDDEN: '/403',

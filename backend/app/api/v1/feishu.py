@@ -2,12 +2,15 @@
 飞书相关API路由
 提供OAuth授权、用户信息获取、webhook事件处理等接口
 """
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+from sqlalchemy.orm import Session
 from app.config import Config
 from app.services.feishu_service import feishu_service
 from app.bots.feishu import feishu_bot
+from app.core.database import get_db
 
 
 router = APIRouter(
@@ -72,6 +75,24 @@ async def get_feishu_user_info(
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"获取用户信息失败: {str(e)}")
+
+
+@router.get("/search-users")
+async def search_feishu_users(
+    keyword: str = Query(..., min_length=1, description="搜索关键词（姓名）")
+):
+    """
+    按姓名搜索飞书用户
+    用于新增用户时快速查找飞书用户ID
+    """
+    try:
+        users = feishu_service.search_users_by_name(keyword)
+        return {
+            "success": True,
+            "users": users
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"搜索用户失败: {str(e)}")
 
 
 @router.get("/user/{user_id}")
@@ -207,3 +228,69 @@ async def send_card(request: SendCardRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"发送卡片失败: {str(e)}")
+
+
+@router.get("/add-user-callback")
+async def add_user_callback(
+    code: str = Query(..., description="飞书授权码"),
+    db: Session = Depends(get_db),
+):
+    """
+    扫码添加用户回调
+    用户扫码授权后，自动获取信息并创建用户
+    """
+    try:
+        from app.services.user_service import UserService
+        user_info = feishu_service.get_user_info_by_code(code)
+        if not user_info:
+            raise HTTPException(status_code=400, detail="获取用户信息失败")
+
+        user_service = UserService(db)
+        feishu_user_id = user_info.get("user_id", "")
+        if not feishu_user_id:
+            raise HTTPException(status_code=400, detail="未获取到用户ID")
+
+        existing_user = user_service.get_user_by_feishu_userid(feishu_user_id)
+        if existing_user:
+            html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>用户已存在</title></head>
+<body style="text-align:center;padding:50px;font-family:sans-serif">
+<h2>用户 "{existing_user.name}" 已在系统中</h2>
+<p>无需重复添加。</p>
+<script>setTimeout(function(){{ window.close(); }}, 2000);</script>
+</body></html>"""
+            return HTMLResponse(content=html)
+
+        from app.schemas.user import UserCreate
+        user_create = UserCreate(
+            name=user_info.get("name", "未知用户"),
+            feishu_user_id=feishu_user_id,
+            feishu_union_id=user_info.get("union_id"),
+            feishu_open_id=user_info.get("open_id"),
+            role="business",
+            email=user_info.get("email"),
+            phone=user_info.get("mobile"),
+            department=user_info.get("department_name"),
+        )
+        new_user, _ = user_service.create_user(user_create)
+
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>添加成功</title></head>
+<body style="text-align:center;padding:50px;font-family:sans-serif">
+<h2>用户添加成功</h2>
+<p>姓名：{new_user.name}</p>
+<p>部门：{new_user.department or '未知'}</p>
+<p>角色：业务人员</p>
+<script>setTimeout(function(){{ window.close(); }}, 2000);</script>
+</body></html>"""
+        return HTMLResponse(content=html)
+    except HTTPException:
+        raise
+    except Exception as e:
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>添加失败</title></head>
+<body style="text-align:center;padding:50px;font-family:sans-serif">
+<h2>用户添加失败</h2>
+<p>{str(e)}</p>
+</body></html>"""
+        return HTMLResponse(content=html)

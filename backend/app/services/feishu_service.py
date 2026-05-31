@@ -150,6 +150,42 @@ class FeishuService:
         
         return data.get("data", {}).get("user_list", [])
     
+    def search_users_by_name(self, keyword: str) -> List[Dict[str, Any]]:
+        """
+        按姓名搜索飞书用户
+        使用通讯录搜索API
+        """
+        url = f"{self.base_url}/open-apis/search/v1/user"
+        headers = {
+            "Authorization": f"Bearer {self.get_app_access_token()}",
+            "Content-Type": "application/json"
+        }
+        params = {
+            "query": keyword,
+            "page_size": 10,
+            "user_id_type": "user_id"
+        }
+        
+        response = requests.get(url, headers=headers, params=params)
+        data = response.json()
+        
+        if data.get("code") != 0:
+            return []
+        
+        users = data.get("data", {}).get("users", [])
+        result = []
+        for u in users:
+            result.append({
+                "user_id": u.get("open_id", ""),
+                "name": u.get("name", ""),
+                "en_name": u.get("en_name", ""),
+                "email": u.get("email", ""),
+                "mobile": u.get("mobile", ""),
+                "avatar_url": u.get("avatar", {}).get("avatar_72", ""),
+                "department_name": u.get("department_name", ""),
+            })
+        return result
+    
     def send_text_message(
         self, 
         receive_id: str, 

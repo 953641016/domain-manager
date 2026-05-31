@@ -3,6 +3,7 @@
 处理飞书OAuth登录、用户信息获取、登出等
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -97,6 +98,48 @@ async def login(
             token_type=result["token_type"],
             user=result["user"]
         )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"登录失败: {str(e)}"
+        )
+
+
+@router.get("/callback", response_class=HTMLResponse)
+async def auth_callback(
+    code: str = Query(..., description="飞书授权码"),
+    db: Session = Depends(get_db),
+):
+    """
+    飞书OAuth回调接口
+
+    飞书用户授权后会重定向到此接口，携带code参数
+    """
+    try:
+        auth_service = AuthService(db)
+        result = auth_service.login_with_feishu_code(code)
+        
+        import json
+        user_json = json.dumps(result['user'], ensure_ascii=False)
+        user_json_escaped = user_json.replace("'", "\\'")
+        access_token = result["access_token"]
+        
+        html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>登录成功</title>
+    <script>
+        localStorage.setItem('access_token', '{access_token}');
+        localStorage.setItem('user', '{user_json_escaped}');
+        window.location.href = '/dm/dashboard';
+    </script>
+</head>
+<body>
+    <p>登录成功，正在跳转...</p>
+</body>
+</html>"""
+        return HTMLResponse(content=html_content)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
