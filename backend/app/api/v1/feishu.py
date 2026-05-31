@@ -136,23 +136,34 @@ async def get_user_by_id(
 async def feishu_webhook(request: Request):
     """
     飞书事件回调处理接口
-    处理URL验证、消息接收等事件
+    处理URL验证、消息接收、卡片按钮回调等事件
     """
+    import logging
+    _log = logging.getLogger("feishu.webhook")
     try:
         # 解析请求体
         request_body = await request.json()
-        
-        # 验证签名
-        if not feishu_service.verify_webhook_signature(request_body):
+
+        _log.info("feishu webhook body keys=%s type=%s",
+                  list(request_body.keys()),
+                  request_body.get("type") or request_body.get("header", {}).get("event_type"))
+
+        # 签名验证：兼容 schema 1.0（token 在根节点）和 2.0（token 在 header）
+        token_in_body = (
+            request_body.get("token")
+            or request_body.get("header", {}).get("token")
+        )
+        if not feishu_service.verify_webhook_signature_token(token_in_body):
+            _log.warning("feishu webhook 签名验证失败 token=%s", token_in_body)
             raise HTTPException(status_code=403, detail="签名验证失败")
-        
+
         # 处理URL验证请求
         if request_body.get("type") == "url_verification":
             return feishu_service.handle_url_verification(request_body)
-        
+
         # 处理其他事件
         event_type = request_body.get("header", {}).get("event_type")
-        
+
         if event_type == "im.message.receive_v1":
             event = request_body.get("event", {})
             await feishu_bot.handle_message(event)
@@ -160,14 +171,17 @@ async def feishu_webhook(request: Request):
 
         # 处理卡片按钮回调（超管点击授权/拒绝账号操作）
         if request_body.get("type") == "card" or event_type == "card.action.trigger":
+            _log.info("feishu card action received")
             return await _handle_card_action(request_body)
 
         # 默认响应
         return {"success": True, "message": "事件已接收"}
-    
+
     except HTTPException:
         raise
     except Exception as e:
+        import logging as _l
+        _l.getLogger("feishu.webhook").exception("处理webhook失败")
         raise HTTPException(status_code=500, detail=f"处理webhook失败: {str(e)}")
 
 

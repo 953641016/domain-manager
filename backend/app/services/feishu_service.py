@@ -399,18 +399,20 @@ class FeishuService:
 
     def verify_webhook_signature(self, request_body: Dict[str, Any]) -> bool:
         """
-        验证webhook请求签名
-        
-        Args:
-            request_body: 请求体
-        
-        Returns:
-            是否验证通过
+        验证webhook请求签名（旧接口，兼容保留）
         """
         if not self.verification_token:
             return True
-        
-        token = request_body.get("token")
+        token = request_body.get("token") or request_body.get("header", {}).get("token")
+        return token == self.verification_token
+
+    def verify_webhook_signature_token(self, token: Optional[str]) -> bool:
+        """
+        验证 token 字符串（webhook / card 回调通用）。
+        未配置 verification_token 时直接放行（开发/测试场景）。
+        """
+        if not self.verification_token:
+            return True
         return token == self.verification_token
     
     def handle_url_verification(self, request_body: Dict[str, Any]) -> Dict[str, Any]:
