@@ -79,6 +79,7 @@ class UserOperationConfirmation(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     confirmed_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True, comment="确认有效期，超时自动作废")
 
     # 备注
     reject_reason = Column(String(500), nullable=True)

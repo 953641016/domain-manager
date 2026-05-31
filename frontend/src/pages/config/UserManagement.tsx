@@ -6,11 +6,12 @@ import {
 import { searchFeishuUsers } from '@/api/feishu';
 import type { FeishuUserInfo } from '@/api/feishu';
 import { QRCodeSVG } from 'qrcode.react';
-import type { User, RoleInfo, UserCreate, UserUpdate } from '@/types/user';
+import type { User, RoleInfo, UserCreate, UserUpdate, Specialist } from '@/types/user';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
+  const [specialists, setSpecialists] = useState<Specialist[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -29,7 +30,7 @@ const UserManagement: React.FC = () => {
     limit: 20,
   });
 
-  const [formData, setFormData] = useState<Partial<UserCreate>>({
+  const [formData, setFormData] = useState<Partial<UserCreate & UserUpdate>>({
     name: '',
     feishu_userid: '',
     role: 'business',
@@ -37,10 +38,12 @@ const UserManagement: React.FC = () => {
     phone: '',
     department: '',
     remark: '',
+    assigned_specialist_id: null,
   });
 
   useEffect(() => {
     loadRoles();
+    loadSpecialists();
   }, []);
 
   useEffect(() => {
@@ -53,6 +56,15 @@ const UserManagement: React.FC = () => {
       setRoles(data);
     } catch (error) {
       console.error('加载角色失败:', error);
+    }
+  };
+
+  const loadSpecialists = async () => {
+    try {
+      const res = await api.get('/users/specialists');
+      setSpecialists(res.data);
+    } catch (error) {
+      console.error('加载专员列表失败:', error);
     }
   };
 
@@ -84,6 +96,7 @@ const UserManagement: React.FC = () => {
         phone: user.phone || '',
         department: user.department || '',
         remark: user.remark || '',
+        assigned_specialist_id: user.assigned_specialist_id ?? null,
       });
     } else {
       setEditingUser(null);
@@ -112,12 +125,16 @@ const UserManagement: React.FC = () => {
     }
 
     try {
+      let result: any;
       if (editingUser) {
-        await updateUser(editingUser.id, formData as UserUpdate);
-        alert('更新成功');
+        result = await updateUser(editingUser.id, formData as UserUpdate);
       } else {
-        await createUser(formData as UserCreate);
-        alert('创建成功');
+        result = await createUser(formData as UserCreate);
+      }
+      if (result?.status === 'pending_approval') {
+        alert('已提交申请，等待超级管理员飞书确认后生效。\n确认ID：' + result.confirmation_id);
+      } else {
+        alert(editingUser ? '更新成功' : '创建成功');
       }
       closeModal();
       loadUsers();
@@ -130,9 +147,13 @@ const UserManagement: React.FC = () => {
   const handleDelete = async (user: User) => {
     if (!confirm('确定要禁用用户 "' + user.name + '" 吗？')) return;
     try {
-      await deleteUser(user.id);
-      alert('已禁用');
-      loadUsers();
+      const result: any = await deleteUser(user.id);
+      if (result?.status === 'pending_approval') {
+        alert('已提交申请，等待超级管理员飞书确认后生效。');
+      } else {
+        alert('已禁用');
+        loadUsers();
+      }
     } catch (error: any) {
       alert('操作失败: ' + (error.response?.data?.detail || error.message));
     }
@@ -141,9 +162,13 @@ const UserManagement: React.FC = () => {
   const handleActivate = async (user: User) => {
     if (!confirm('确定要激活用户 "' + user.name + '" 吗？')) return;
     try {
-      await activateUser(user.id);
-      alert('已激活');
-      loadUsers();
+      const result: any = await activateUser(user.id);
+      if (result?.status === 'pending_approval') {
+        alert('已提交申请，等待超级管理员飞书确认后生效。');
+      } else {
+        alert('已激活');
+        loadUsers();
+      }
     } catch (error: any) {
       alert('操作失败: ' + (error.response?.data?.detail || error.message));
     }
@@ -475,6 +500,24 @@ const UserManagement: React.FC = () => {
                     ))}
                   </select>
                 </div>
+                {formData.role === 'business' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      归属专员
+                      <span className="ml-1 text-xs text-gray-400">（业务人员必填）</span>
+                    </label>
+                    <select
+                      value={formData.assigned_specialist_id ?? ''}
+                      onChange={(e) => setFormData({ ...formData, assigned_specialist_id: e.target.value ? Number(e.target.value) : null })}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    >
+                      <option value="">-- 请选择归属专员 --</option>
+                      {specialists.map(s => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">邮箱</label>
                   <input

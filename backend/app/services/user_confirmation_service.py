@@ -175,6 +175,13 @@ class UserOperationConfirmationService:
         if not confirmation.is_pending:
             return None
 
+        # 已过期则自动作废
+        if confirmation.expires_at and datetime.utcnow() > confirmation.expires_at.replace(tzinfo=None):
+            confirmation.status = ConfirmationStatus.CANCELLED
+            confirmation.reject_reason = "确认已超时（24小时），自动作废"
+            self.db.commit()
+            return None
+
         # 审批人必须是超级管理员
         super_admin = self.get_super_admin()
         if not super_admin or super_admin.id != approver_user_id:

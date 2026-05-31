@@ -24,6 +24,7 @@ export interface User {
   created_at: string;
   updated_at: string;
   remark: string | null;
+  assigned_specialist_id: number | null;
 }
 
 export interface RoleInfo {
@@ -59,4 +60,10 @@ export interface UserUpdate {
   role?: string;
   is_active?: boolean;
   remark?: string;
+  assigned_specialist_id?: number | null;
+}
+
+export interface Specialist {
+  id: number;
+  name: string;
 }
