@@ -331,10 +331,26 @@ class UserOperationConfirmationService:
         return confirmation
 
     def get_super_admin(self) -> Optional[User]:
-        """获取超级管理员（唯一）"""
-        return self.db.query(User).filter_by(
-            role="super_admin",
-            is_active=True
+        """
+        获取超级管理员。
+        优先返回 .env 中 SUPER_ADMIN_FEISHU_USER_ID 指定的用户；
+        若未配置或未找到，则返回任意有飞书ID的 super_admin。
+        """
+        from app.config import Config
+        feishu_id = Config.SUPER_ADMIN_FEISHU_USER_ID
+        if feishu_id:
+            user = self.db.query(User).filter(
+                User.feishu_user_id == feishu_id,
+                User.is_active == True,
+            ).first()
+            if user:
+                return user
+        # 兜底：取有飞书ID的活跃超管
+        return self.db.query(User).filter(
+            User.role == "super_admin",
+            User.is_active == True,
+            User.feishu_user_id != None,
+            User.feishu_user_id != "",
         ).first()
 
     def get_admin_users(self, exclude_user_id: Optional[int] = None) -> List[User]:
