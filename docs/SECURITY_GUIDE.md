@@ -98,7 +98,11 @@ python scripts/manage_users.py list --role super_admin
 
 ## 3. 安全加固步骤
 
-### 3.1 敏感数据加密
+### 3.1 敏感数据加密（存储层）
+
+> **适用范围**：以下加密用于保护**存入数据库**的 API 密钥（`RegAccount.api_key`、`DnsAccount.api_key`），
+> 属于**静态加密**（encryption at rest）。  
+> 传输层安全由 HTTPS（Nginx TLS 终止）保障，与此机制相互独立。
 
 #### 步骤 1: 生成加密密钥
 

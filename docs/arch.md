@@ -343,7 +343,7 @@ interface DnsAccount {
 interface User {
   id: number;
   name: string;
-  role: 'business' | 'domain_spec' | 'admin';
+  role: 'business' | 'domain_spec' | 'admin' | 'super_admin';
   feishu_userid?: string;
   feishu_unionid?: string;
   email?: string;
@@ -564,16 +564,32 @@ PUT /api/users/:id
 DELETE /api/users/:id
 ```
 
-#### 默认配置管理
-```
-# 获取默认配置
-GET /api/config/defaults
-Response: SystemDefaults
+#### 默认配置管理（per-user，v1.3.3+）
 
-# 更新默认配置
-PUT /api/config/defaults
-Body: { default_registrar_id, default_reg_account_id, default_dns_provider_id, default_dns_account_id }
+> 每位 domain_spec / super_admin 各有独立一行默认配置。
+
 ```
+# 获取当前登录用户自己的默认配置（domain_spec / super_admin 均可）
+GET /api/v1/config/defaults
+Response: { user_id, default_registrar, default_dns_provider,
+            default_reg_account_id, default_dns_account_id }
+
+# 设置自己的默认配置（需超管飞书确认，返回 pending_approval）
+PUT /api/v1/config/defaults
+Body: { default_registrar?, default_dns_provider?,
+        default_reg_account_id?, default_dns_account_id? }
+
+# 查看所有专员的默认配置列表（super_admin 专属）
+GET /api/v1/config/defaults/all
+Response: [ { user_id, user_name, user_role, default_registrar, ... }, ... ]
+
+# 超管替指定专员设置默认配置（super_admin 专属，需飞书确认）
+PUT /api/v1/config/defaults/{target_user_id}
+Body: { default_registrar?, default_dns_provider?,
+        default_reg_account_id?, default_dns_account_id? }
+```
+
+注意：`default_registrar` / `default_dns_provider` 为注册商/DNS 服务商的字符串 code（如 `"cloudflare"`），不是 ID。
 
 #### 检查域名现有解析记录，识别新增/修改
 ```
@@ -780,7 +796,7 @@ erDiagram
     USERS {
         int id PK "自增ID"
         string name UK "用户姓名"
-        string role "角色: business/domain_spec/admin"
+        string role "角色: business/domain_spec/admin/super_admin"
         string feishu_userid UK "飞书用户ID"
         string feishu_unionid "飞书UnionID"
         string email "邮箱"
@@ -978,7 +994,7 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String(100), nullable=False)
-    role = Column(String(20), nullable=False)  # business, domain_spec, admin
+    role = Column(String(20), nullable=False)  # business, domain_spec, admin, super_admin
     feishu_userid = Column(String(100), nullable=True, unique=True)
     feishu_unionid = Column(String(100), nullable=True)
     email = Column(String(255), nullable=True)
@@ -1927,9 +1943,10 @@ class DirectRegistrationService:
 
 | 角色 | Web登录权限 | 说明 |
 |------|------------|------|
-| 业务同事 | ❌ 禁止 | 仅可通过飞书提交申请 |
-| 域名专员 | ✅ 允许 | 可查看分配的域名、处理申请 |
-| 系统管理员 | ✅ 允许 | 可访问所有功能 |
+| 业务同事 (`business`) | ❌ 禁止 | 仅可通过飞书提交申请 |
+| 域名专员 (`domain_spec`) | ✅ 允许 | 可查看/管理自己名下域名和账号、处理申请 |
+| 系统管理员 (`admin`) | ✅ 允许 | 可管理用户（超管除外），不能直接写服务商配置 |
+| 超级管理员 (`super_admin`) | ✅ 允许 | 全部权限，关键操作需飞书二次确认 |
 
 ### 11.2 Web认证流程
 
@@ -1951,7 +1968,7 @@ sequenceDiagram
     Backend->>Backend: 检查角色权限
     alt 用户角色是 business
         Backend->>Frontend: 403 无权访问
-    else 用户角色是 domain_spec/admin
+    else 用户角色是 domain_spec/admin/super_admin
         Backend->>Frontend: 200 {access_token, user}
     end
     Frontend->>Frontend: 保存token到localStorage
@@ -2073,7 +2090,7 @@ import { Navigate } from 'react-router-dom';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole?: 'admin' | 'domain_spec';
+  requiredRole?: 'admin' | 'domain_spec' | 'super_admin';
 }
 
 export function ProtectedRoute({ children, requiredRole }: ProtectedRouteProps) {
