@@ -256,7 +256,7 @@ async def add_user_callback(
             raise HTTPException(status_code=400, detail="获取用户信息失败")
 
         user_service = UserService(db)
-        feishu_user_id = user_info.get("user_id", "")
+        feishu_user_id = user_info.get("user_id") or user_info.get("open_id", "")
         if not feishu_user_id:
             raise HTTPException(status_code=400, detail="未获取到用户ID")
 
