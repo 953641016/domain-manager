@@ -210,28 +210,56 @@ feishu_bitable_configs
 
 ## 7. 实现状态
 
-### 已实现
+### 已实现 ✅
 
 | 功能 | 文件 |
 |------|------|
 | 读取 Bitable 记录 | `feishu_service.read_bitable_records()` |
 | 向专员发 DNS 审批卡片 | `feishu_service.send_dns_approval_card()` |
-| 接收表格申请（旧版，需重构） | `POST /api/v1/feishu/table-request` |
+| 主确认页数据接口 | `GET /feishu/confirm-data` |
+| Bitable 自助绑定 | `POST /feishu/bind-bitable` |
+| 提交申请 | `POST /feishu/submit-request` |
 | 专员卡片回调处理 | `_handle_dns_card_action()` |
-| open_id/user_id 双向查用户 | `user_service.get_user_by_any_feishu_id()` |
+| 确认页前端 | `frontend/src/pages/FeishuConfirm.tsx` |
+| DNS 执行幂等（存在且一致则跳过） | `execution_service._execute_dns()` |
+| 域名注册幂等检查 | `request_service.get_pending_domain_request()` |
+| 扫码注册走超管确认流 | `GET /feishu/add-user-callback`（已修） |
 
-### 待实现
+### 待实施（飞书文档侧配置）
 
-| 功能 | 优先级 |
-|------|--------|
-| `feishu_bitable_configs` 数据库表 | 🔴 高 |
-| 确认页（Web 前端页面） | 🔴 高 |
-| `GET /feishu/confirm-request` 主入口 | 🔴 高 |
-| 飞书 OAuth 在确认页的接入 | 🔴 高 |
-| Bitable 自助绑定接口 | 🔴 高 |
-| `domain_register` 幂等检查 | 🟠 中 |
-| DNS 执行幂等判断（存在且一致则跳过） | 🟠 中 |
-| 飞书文档侧：补建 CF/GSC/邮箱 Bitable | 🟡 低（实施阶段） |
+| 功能 | 说明 |
+|------|------|
+| 各节补建 Bitable 表格 | CF/GSC/邮箱三节尚未建 Bitable |
+| 各按钮配置 URL | `?section=xxx` 格式 |
+
+---
+
+## 8. 业务人员加入流程
+
+```
+管理员在用户管理页面打开"扫码添加"
+        ↓
+出现飞书 OAuth 二维码
+        ↓
+业务人员用飞书扫码
+        ↓
+系统获取飞书用户信息 → 发超管飞书确认卡片
+  ┌─────────────────────────────────────┐
+  │  新用户申请加入                      │
+  │  姓名：张三                          │
+  │  飞书ID：ou_xxx                      │
+  │  角色：业务人员                      │
+  │  来源：扫码注册                      │
+  │  [✅ 批准]  [❌ 拒绝]               │
+  └─────────────────────────────────────┘
+        ↓ 超管在飞书客户端点批准
+系统创建用户记录 → 发飞书通知告知业务人员
+        ↓
+管理员在 Web 后台为该业务人员设置归属专员
+  （此操作同样需要超管飞书确认）
+```
+
+> 注：若系统尚未配置超管（冷启动阶段），扫码后直接创建用户，跳过确认。
 
 ---
 

@@ -243,11 +243,14 @@ async def add_user_callback(
     db: Session = Depends(get_db),
 ):
     """
-    扫码添加用户回调
-    用户扫码授权后，自动获取信息并创建用户
+    扫码添加用户回调（经超管飞书确认后才真正创建）
+    用户扫码 → 获取飞书信息 → 发超管确认卡片 → 超管批准 → 创建用户
     """
     try:
         from app.services.user_service import UserService
+        from app.services.user_confirmation_service import UserOperationConfirmationService
+        from app.models.user_confirmation import ConfirmationOperationType
+
         user_info = feishu_service.get_user_info_by_code(code)
         if not user_info:
             raise HTTPException(status_code=400, detail="获取用户信息失败")
@@ -268,27 +271,68 @@ async def add_user_callback(
 </body></html>"""
             return HTMLResponse(content=html)
 
-        from app.schemas.user import UserCreate
-        user_create = UserCreate(
-            name=user_info.get("name", "未知用户"),
-            feishu_user_id=feishu_user_id,
-            feishu_union_id=user_info.get("union_id"),
-            feishu_open_id=user_info.get("open_id"),
-            role="business",
-            email=user_info.get("email"),
-            phone=user_info.get("mobile"),
-            department=user_info.get("department_name"),
-        )
-        new_user, _ = user_service.create_user(user_create)
-
-        html = f"""<!DOCTYPE html>
+        # 发超管确认卡片，由超管审批后才创建用户
+        conf_svc = UserOperationConfirmationService(db)
+        super_admin = conf_svc.get_super_admin()
+        if not super_admin:
+            # 系统尚未配置超管，临时直接创建（冷启动场景）
+            from app.schemas.user import UserCreate
+            user_create = UserCreate(
+                name=user_info.get("name", "未知用户"),
+                feishu_user_id=feishu_user_id,
+                feishu_union_id=user_info.get("union_id"),
+                feishu_open_id=user_info.get("open_id"),
+                role="business",
+                email=user_info.get("email"),
+                phone=user_info.get("mobile"),
+                department=user_info.get("department_name"),
+            )
+            user_service.create_user(user_create)
+            html = """<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>添加成功</title></head>
 <body style="text-align:center;padding:50px;font-family:sans-serif">
-<h2>用户添加成功</h2>
-<p>姓名：{new_user.name}</p>
-<p>部门：{new_user.department or '未知'}</p>
-<p>角色：业务人员</p>
-<script>setTimeout(function(){{ window.close(); }}, 2000);</script>
+<h2>已添加（系统初始化模式）</h2>
+<p>超级管理员尚未配置，已直接创建账号。</p>
+<script>setTimeout(function(){ window.close(); }, 3000);</script>
+</body></html>"""
+            return HTMLResponse(content=html)
+
+        # 使用超管 ID 作为发起人（扫码人尚无系统账号）
+        conf = conf_svc.create_confirmation(
+            operation_type=ConfirmationOperationType.ADD_DOMAIN_SPEC,
+            initiator_user_id=super_admin.id,
+            initiator_name=user_info.get("name", "未知用户"),
+            initiator_feishu_userid=feishu_user_id,
+            target_user_data={
+                "name": user_info.get("name"),
+                "feishu_userid": feishu_user_id,
+            },
+            operation_details={
+                "action": "create_user",
+                "source": "qr_scan",
+                "user_data": {
+                    "name": user_info.get("name", "未知用户"),
+                    "role": "business",
+                    "feishu_user_id": feishu_user_id,
+                    "feishu_union_id": user_info.get("union_id"),
+                    "feishu_open_id": user_info.get("open_id"),
+                    "email": user_info.get("email"),
+                    "department": user_info.get("department_name"),
+                },
+            },
+            requires_super_admin=True,
+            remark="qr_scan",
+        )
+        conf_svc.send_account_op_card_to_super_admin(conf)
+
+        name = user_info.get("name", "您")
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>申请已提交</title></head>
+<body style="text-align:center;padding:50px;font-family:sans-serif">
+<h2>申请已提交</h2>
+<p>{name}，您的加入申请已发送给超级管理员审批。</p>
+<p>审批通过后您将收到飞书通知，届时即可使用系统。</p>
+<script>setTimeout(function(){{ window.close(); }}, 4000);</script>
 </body></html>"""
         return HTMLResponse(content=html)
     except HTTPException:
