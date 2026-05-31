@@ -604,6 +604,9 @@ class UserOperationConfirmationService:
             "delete_provider": "删除服务商",
         }
         op_event = 事项_map.get(action) or 事项_map.get(op_type, op_type)
+        # 超管转让：覆盖操作事项（否则显示"修改用户"与卡片标题矛盾）
+        if details.get("transfer_super_admin"):
+            op_event = "超管转让"
 
         # 操作对象（仅目标身份）；变更明细单独成块
         change_elements: list = []
@@ -716,7 +719,7 @@ class UserOperationConfirmationService:
                     },
                     {
                         "tag": "button",
-                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                        "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
                         "type": "danger",
                         "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)},
                     },
@@ -781,16 +784,21 @@ class UserOperationConfirmationService:
         if action == "update_user":
             changes = details.get("changes", {}) or {}
             parts = []
-            if "name" in changes:
+            if changes.get("name"):
                 parts.append(f"姓名→{changes['name']}")
-            if "role" in changes:
+            if changes.get("role"):
                 parts.append(f"角色→{self._role_name(changes['role'])}")
-            if "department" in changes:
+            if changes.get("department"):
                 parts.append(f"部门→{changes['department']}")
-            if "assigned_specialist_id" in changes:
+            if changes.get("assigned_specialist_id"):
                 parts.append(f"归属专员ID→{changes['assigned_specialist_id']}")
-            if "is_active" in changes:
-                parts.append(f"启用→{changes['is_active']}")
+            if "is_active" in changes and changes["is_active"] is not None:
+                parts.append(f"状态→{'启用' if changes['is_active'] else '禁用'}")
+            # 超管转让：简化描述，不展开 changes 细节
+            if details.get("transfer_super_admin"):
+                old_sa = details.get("old_super_admin_name", "原超管")
+                name = details.get("target_name", "")
+                return f"{prefix}超管转让：{old_sa} → {name}"
             summary = "；".join(parts) if parts else "（无可显示字段）"
             return f"{prefix}更新用户：{details.get('target_name')} - {summary}"
 
