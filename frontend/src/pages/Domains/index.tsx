@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
+import { formatDate as fmtDate } from '@/utils/datetime';
 
 interface Domain {
   id: number;
@@ -54,10 +55,7 @@ export default function DomainsPage() {
     fetchDomains();
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  };
+  const formatDate = (dateStr: string) => fmtDate(dateStr);
 
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { color: string; label: string }> = {

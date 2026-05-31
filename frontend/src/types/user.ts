@@ -15,9 +15,9 @@ export interface User {
   email: string | null;
   phone: string | null;
   department: string | null;
-  feishu_userid: string;
-  feishu_unionid: string | null;
-  feishu_openid: string | null;
+  feishu_user_id: string;
+  feishu_union_id: string | null;
+  feishu_open_id: string | null;
   role: string;
   permissions: string[];
   is_active: boolean;
@@ -42,9 +42,9 @@ export interface UserListResponse {
 
 export interface UserCreate {
   name: string;
-  feishu_userid: string;
-  feishu_unionid?: string;
-  feishu_openid?: string;
+  feishu_user_id: string;
+  feishu_union_id?: string;
+  feishu_open_id?: string;
   email?: string;
   phone?: string;
   department?: string;

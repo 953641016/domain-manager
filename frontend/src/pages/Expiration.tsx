@@ -3,6 +3,7 @@
  */
 import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
+import { formatDate as fmtDate, daysUntil } from '@/utils/datetime';
 
 interface ExpiringDomain {
   id: number;
@@ -35,18 +36,8 @@ export default function ExpirationPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  };
-
-  const getDaysRemaining = (dateStr: string) => {
-    if (!dateStr) return null;
-    const expiration = new Date(dateStr);
-    const now = new Date();
-    const diff = expiration.getTime() - now.getTime();
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
-  };
+  const formatDate = (dateStr: string) => fmtDate(dateStr);
+  const getDaysRemaining = (dateStr: string) => daysUntil(dateStr);
 
   const getStatusColor = (days: number | null) => {
     if (days === null) return 'bg-gray-100 text-gray-800';

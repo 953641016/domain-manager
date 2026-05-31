@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
+import { formatDate as fmtDate, daysUntil } from '@/utils/datetime';
 
 interface DashboardStats {
   totalDomains: number;
@@ -61,19 +62,8 @@ export default function DashboardPage() {
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    if (!dateStr) return '-';
-    const date = new Date(dateStr);
-    return date.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  };
-
-  const getDaysUntilExpiration = (dateStr: string) => {
-    if (!dateStr) return null;
-    const expiration = new Date(dateStr);
-    const now = new Date();
-    const diff = expiration.getTime() - now.getTime();
-    return Math.ceil(diff / (1000 * 60 * 60 * 24));
-  };
+  const formatDate = (dateStr: string) => fmtDate(dateStr);
+  const getDaysUntilExpiration = (dateStr: string) => daysUntil(dateStr);
 
   if (loading) {
     return (

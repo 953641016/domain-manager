@@ -5,6 +5,7 @@
  */
 import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
+import { formatDate as fmtDate } from '@/utils/datetime';
 
 interface CertificateInfo {
   domain: string;
@@ -52,11 +53,7 @@ export default function SslPage() {
     }
   };
 
-  const formatDate = (s: string) => {
-    if (!s) return '-';
-    const d = new Date(s);
-    return isNaN(d.getTime()) ? s : d.toLocaleDateString('zh-CN', { timeZone: 'Asia/Shanghai' });
-  };
+  const formatDate = (s: string) => fmtDate(s);
 
   const statusBadge = (cert: CertificateInfo) => {
     if (!cert.is_valid) {

@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { api } from '@/api/client';
 import UserManagement from './config/UserManagement';
+import { formatDateTime } from '@/utils/datetime';
 
 interface RegistrarInfo {
   code: string;
@@ -438,7 +439,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.created_at ? new Date(account.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '-'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <button onClick={() => openRegModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
                               <button onClick={() => handleRegDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
@@ -592,7 +593,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.created_at ? new Date(account.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '-'}</td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                               <button onClick={() => openDnsModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
                               <button onClick={() => handleDnsDelete(account)} className="text-red-600 hover:text-red-900">删除</button>

@@ -4,6 +4,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { api } from '@/api/client';
+import { formatDateTime } from '@/utils/datetime';
 
 interface RequestDetail {
   id: string;
@@ -78,7 +79,7 @@ export default function RequestDetailPage() {
 
   const formatDate = (dateStr: string) => {
     if (!dateStr) return '-';
-    return new Date(dateStr).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' });
+    return formatDateTime(dateStr);
   };
 
   const getStatusBadge = (status: string) => {

@@ -7,6 +7,7 @@ import { searchFeishuUsers } from '@/api/feishu';
 import type { FeishuUserInfo } from '@/api/feishu';
 import { QRCodeSVG } from 'qrcode.react';
 import type { User, RoleInfo, UserCreate, UserUpdate, Specialist } from '@/types/user';
+import { formatDateTime } from '@/utils/datetime';
 
 const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
@@ -32,7 +33,7 @@ const UserManagement: React.FC = () => {
 
   const [formData, setFormData] = useState<Partial<UserCreate & UserUpdate>>({
     name: '',
-    feishu_userid: '',
+    feishu_user_id: '',
     role: 'business',
     email: '',
     phone: '',
@@ -90,7 +91,7 @@ const UserManagement: React.FC = () => {
       setEditingUser(user);
       setFormData({
         name: user.name,
-        feishu_userid: user.feishu_userid,
+        feishu_user_id: user.feishu_user_id,
         role: user.role,
         email: user.email || '',
         phone: user.phone || '',
@@ -102,7 +103,7 @@ const UserManagement: React.FC = () => {
       setEditingUser(null);
       setFormData({
         name: '',
-        feishu_userid: '',
+        feishu_user_id: '',
         role: 'business',
         email: '',
         phone: '',
@@ -119,7 +120,7 @@ const UserManagement: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.name || !formData.feishu_userid || !formData.role) {
+    if (!formData.name || !formData.feishu_user_id || !formData.role) {
       alert('请填写必填字段（姓名、飞书用户ID、角色）');
       return;
     }
@@ -226,7 +227,7 @@ const UserManagement: React.FC = () => {
     setFormData({
       ...formData,
       name: user.name,
-      feishu_userid: user.user_id,
+      feishu_user_id: user.user_id,
       email: user.email || '',
       phone: user.mobile || '',
       department: user.department_name || '',
@@ -356,7 +357,7 @@ const UserManagement: React.FC = () => {
                   <tr key={user.id} className="hover:bg-gray-50">
                     <td className="px-4 md:px-6 py-4">
                       <div className="text-sm font-medium text-gray-900">{user.name}</div>
-                      <div className="text-xs text-gray-500 md:hidden">{user.feishu_userid}</div>
+                      <div className="text-xs text-gray-500 md:hidden">{user.feishu_user_id}</div>
                       {user.email && <div className="text-xs text-gray-400">{user.email}</div>}
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap">
@@ -365,7 +366,7 @@ const UserManagement: React.FC = () => {
                       </span>
                     </td>
                     <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {user.feishu_userid}
+                      {user.feishu_user_id}
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -373,7 +374,7 @@ const UserManagement: React.FC = () => {
                       </span>
                     </td>
                     <td className="hidden lg:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {new Date(user.created_at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}
+                      {formatDateTime(user.created_at)}
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                       <button onClick={() => openModal(user)} className="text-blue-600 hover:text-blue-900 mr-2">编辑</button>
@@ -440,7 +441,7 @@ const UserManagement: React.FC = () => {
                   {editingUser ? (
                     <input
                       type="text"
-                      value={formData.feishu_userid}
+                      value={formData.feishu_user_id}
                       disabled
                       className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
                     />
@@ -449,8 +450,8 @@ const UserManagement: React.FC = () => {
                       <div className="flex gap-2">
                         <input
                           type="text"
-                          value={formData.feishu_userid}
-                          onChange={(e) => setFormData({ ...formData, feishu_userid: e.target.value })}
+                          value={formData.feishu_user_id}
+                          onChange={(e) => setFormData({ ...formData, feishu_user_id: e.target.value })}
                           className="flex-1 border border-gray-300 rounded-lg px-3 py-2"
                           placeholder="ou_xxxxxxxxxxxxxxxx"
                         />
