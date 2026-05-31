@@ -57,9 +57,66 @@ class TaskScheduler:
                     status="success"
                 )
 
-                # TODO: 发送飞书通知
+                # 发送飞书到期提醒
+                from app.services.feishu_service import FeishuService
+                from app.models.user import User
+                from app.config import Config
+
+                feishu = FeishuService()
+
+                # 预查超管，用于无主域名或紧急场景的兜底通知
+                sa_feishu_id = None
+                sa_feishu_type = "user_id"
+                if Config.SUPER_ADMIN_FEISHU_USER_ID:
+                    sa = self.db.query(User).filter(
+                        User.feishu_user_id == Config.SUPER_ADMIN_FEISHU_USER_ID
+                    ).first()
+                    if sa:
+                        sa_feishu_id = getattr(sa, "feishu_open_id", None) or getattr(sa, "feishu_user_id", None)
+                        sa_feishu_type = "open_id" if getattr(sa, "feishu_open_id", None) else "user_id"
+
                 for domain in expiring_domains:
-                    logger.info(f"域名 {domain.name} 将在 {domain.expiration_date} 到期")
+                    expire_dt = domain.expiration_date
+                    # 兼容有无时区的 datetime
+                    expire_days = max(0, (expire_dt.replace(tzinfo=None) - datetime.now()).days)
+                    exp_str = expire_dt.strftime("%Y-%m-%d") if expire_dt else ""
+                    logger.info(f"域名 {domain.name} 将在 {domain.expiration_date} 到期（剩余 {expire_days} 天）")
+
+                    notified = False
+                    # 优先通知域名归属专员
+                    if domain.owner_id:
+                        owner = self.db.query(User).filter(User.id == domain.owner_id).first()
+                        if owner:
+                            receive_id = getattr(owner, "feishu_open_id", None) or getattr(owner, "feishu_user_id", None)
+                            if receive_id:
+                                receive_type = "open_id" if getattr(owner, "feishu_open_id", None) else "user_id"
+                                try:
+                                    feishu.send_domain_alert_card(
+                                        receive_id=receive_id,
+                                        domain_name=domain.name,
+                                        expire_days=expire_days,
+                                        expiration_date=exp_str,
+                                        registrar=domain.registrar_code or "",
+                                        receive_id_type=receive_type,
+                                    )
+                                    notified = True
+                                    logger.info(f"已向专员 {owner.name} 发送域名 {domain.name} 到期提醒")
+                                except Exception as notify_err:
+                                    logger.warning(f"向专员发送到期提醒失败 ({domain.name}): {notify_err}")
+
+                    # 兜底：无主域名或专员无飞书ID时通知超管；紧急（≤7天）时也同步通知超管
+                    if sa_feishu_id and (not notified or expire_days <= 7):
+                        try:
+                            feishu.send_domain_alert_card(
+                                receive_id=sa_feishu_id,
+                                domain_name=domain.name,
+                                expire_days=expire_days,
+                                expiration_date=exp_str,
+                                registrar=domain.registrar_code or "",
+                                receive_id_type=sa_feishu_type,
+                            )
+                        except Exception as notify_err:
+                            logger.warning(f"向超管发送到期提醒失败 ({domain.name}): {notify_err}")
 
             return expiring_domains
 

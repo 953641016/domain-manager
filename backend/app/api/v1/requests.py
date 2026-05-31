@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import get_current_active_user, require_manage_users
+from app.api.dependencies import get_current_active_user, require_manage_users, require_approve_request
 from app.services.request_service import RequestService
 from app.schemas.request import (
     RequestCreate, RequestUpdate, RequestApprove, RequestReject,
@@ -101,7 +101,7 @@ def get_request_stats(
 
 @router.get("/pending")
 def get_pending_requests(
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """
@@ -225,13 +225,13 @@ def create_request(
 def update_request(
     request_id: str,
     data: RequestUpdate,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """
     更新申请
 
-    需要管理员权限
+    需要域名专员或管理员权限
     """
     service = RequestService(db)
     request = service.update_request(request_id, data)
@@ -249,7 +249,7 @@ def update_request(
 def approve_request(
     request_id: str,
     data: RequestApprove = RequestApprove(),
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """
@@ -305,7 +305,7 @@ def approve_request(
 def reject_request(
     request_id: str,
     data: RequestReject,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """
@@ -340,7 +340,7 @@ def reject_request(
 def complete_request(
     request_id: str,
     execution_result: Optional[dict] = None,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """
@@ -364,7 +364,7 @@ def complete_request(
 def fail_request(
     request_id: str,
     error_message: str,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_approve_request),
     db: Session = Depends(get_db),
 ):
     """

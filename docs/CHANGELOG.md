@@ -12,6 +12,16 @@
 
 ---
 
+## [1.3.6] — 2026-06-01
+
+### 修复
+- **审批路由权限守卫**（`backend/app/api/v1/requests.py`）：`PUT /requests/{id}` 误用 `require_manage_users`，`domain_spec` 角色（`can_approve_request=True` 但 `can_manage_users=False`）实际被拦截无法更新申请。改为 `require_approve_request`，与同文件其余审批路由一致。
+
+### 新增
+- **域名到期飞书通知**（`backend/app/tasks/scheduler.py`）：`check_expiring_domains()` 原 TODO 补全。现在按优先级发送飞书卡片：优先通知域名归属专员；7天内到期或域名无主时同步通知超管作为兜底。调用现有 `FeishuService.send_domain_alert_card()`，失败只记 warning 不阻断其余域名处理。
+
+---
+
 ## [1.3.5] — 2026-06-01
 
 ### 运维
