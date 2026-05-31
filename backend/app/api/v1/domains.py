@@ -98,7 +98,7 @@ def get_domain(
     db: Session = Depends(get_db),
 ):
     """
-    获取域名详情
+    获取域名详情（domain_spec 只能查看自己名下的域名）
     """
     service = DomainService(db)
     domain = service.get_domain(domain_id)
@@ -107,6 +107,13 @@ def get_domain(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="域名不存在"
+        )
+
+    # domain_spec 只能查看自己名下的域名
+    if current_user.role == "domain_spec" and domain.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="无权查看此域名"
         )
 
     return DomainResponse.model_validate(domain)
@@ -125,12 +132,14 @@ def get_expiring_domains(
     db: Session = Depends(get_db),
 ):
     """
-    获取即将到期的域名
+    获取即将到期的域名（domain_spec 只看自己名下的；super_admin 看全部）
 
     默认返回30天内到期的域名
     """
     service = DomainService(db)
-    domains = service.get_expiring_domains(days)
+    # domain_spec 只能看自己名下的域名
+    owner_id = current_user.id if current_user.role == "domain_spec" else None
+    domains = service.get_expiring_domains(days, owner_id=owner_id)
 
     return {
         "total": len(domains),

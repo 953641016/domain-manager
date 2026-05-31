@@ -1,7 +1,7 @@
 """
 DNS解析管理API路由
 """
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -12,6 +12,7 @@ from app.schemas.dns import (
     DnsRecordSyncRequest, DnsRecordSyncResponse
 )
 from app.models.user import User
+from app.models.domain import Domain
 
 router = APIRouter(
     prefix="/dns",
@@ -30,11 +31,31 @@ def get_dns_records(
     db: Session = Depends(get_db),
 ):
     """
-    获取DNS记录列表
+    获取DNS记录列表（domain_spec 只能查看自己名下域名的记录）
     """
     service = DnsService(db)
+
+    # domain_spec 只能查看自己名下域名的 DNS 记录
+    filter_domain_ids: Optional[List[int]] = None
+    if current_user.role == "domain_spec":
+        if domain_id is not None:
+            # 验证该域名归属当前专员
+            domain = db.query(Domain).filter(Domain.id == domain_id).first()
+            if not domain or domain.owner_id != current_user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="无权查看此域名的DNS记录"
+                )
+        else:
+            # 无 domain_id 过滤时，只返回自己名下域名的记录
+            filter_domain_ids = [
+                row.id for row in
+                db.query(Domain.id).filter(Domain.owner_id == current_user.id).all()
+            ]
+
     records = service.get_records(
         domain_id=domain_id,
+        domain_ids=filter_domain_ids,
         record_type=record_type,
         host=host,
         skip=skip,
@@ -42,6 +63,7 @@ def get_dns_records(
     )
     total = service.get_record_count(
         domain_id=domain_id,
+        domain_ids=filter_domain_ids,
         record_type=record_type,
         host=host
     )
@@ -59,7 +81,7 @@ def get_dns_record(
     db: Session = Depends(get_db),
 ):
     """
-    获取DNS记录详情
+    获取DNS记录详情（domain_spec 只能查看自己名下域名的记录）
     """
     service = DnsService(db)
     record = service.get_record(record_id)
@@ -69,6 +91,15 @@ def get_dns_record(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="DNS记录不存在"
         )
+
+    # domain_spec 只能查看自己名下域名的记录
+    if current_user.role == "domain_spec":
+        domain = db.query(Domain).filter(Domain.id == record.domain_id).first()
+        if not domain or domain.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权查看此DNS记录"
+            )
 
     return DnsRecordResponse.model_validate(record)
 
@@ -80,8 +111,17 @@ def get_domain_records(
     db: Session = Depends(get_db),
 ):
     """
-    获取域名的所有DNS记录
+    获取域名的所有DNS记录（domain_spec 只能查看自己名下域名的记录）
     """
+    # domain_spec 只能查看自己名下域名的记录
+    if current_user.role == "domain_spec":
+        domain = db.query(Domain).filter(Domain.id == domain_id).first()
+        if not domain or domain.owner_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权查看此域名的DNS记录"
+            )
+
     service = DnsService(db)
     records = service.get_records_by_domain(domain_id)
 

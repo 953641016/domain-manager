@@ -1,7 +1,7 @@
 """
 申请管理API路由
 """
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -12,6 +12,16 @@ from app.schemas.request import (
     RequestResponse, RequestListResponse, RequestStatsResponse
 )
 from app.models.user import User
+
+
+def _get_specialist_scope_ids(db: Session, specialist_id: int) -> List[int]:
+    """获取该专员可见的申请者 ID 集合（专员自身 + 其归属业务用户）"""
+    rows = db.query(User.id).filter(
+        User.assigned_specialist_id == specialist_id
+    ).all()
+    ids = [row.id for row in rows]
+    ids.append(specialist_id)
+    return ids
 
 router = APIRouter(
     prefix="/requests",
@@ -40,8 +50,13 @@ def get_requests(
 
     # 根据角色决定查询范围
     requester_id = None
+    requester_ids = None
     if current_user.role == "business":
+        # 业务用户：只能看自己的申请
         requester_id = current_user.id
+    elif current_user.role == "domain_spec":
+        # 域名专员：只能看自己及其归属业务用户的申请
+        requester_ids = _get_specialist_scope_ids(db, current_user.id)
 
     requests = service.get_requests(
         skip=skip,
@@ -49,12 +64,14 @@ def get_requests(
         status=status_filter,
         request_type=type,
         requester_id=requester_id,
+        requester_ids=requester_ids,
         domain_name=domain_name
     )
     total = service.get_request_count(
         status=status_filter,
         request_type=type,
         requester_id=requester_id,
+        requester_ids=requester_ids,
         domain_name=domain_name
     )
 
@@ -70,10 +87,15 @@ def get_request_stats(
     db: Session = Depends(get_db),
 ):
     """
-    获取申请统计
+    获取申请统计（domain_spec 只统计自己归属范围；admin/super_admin 统计全局）
     """
     service = RequestService(db)
-    stats = service.get_stats()
+    requester_ids = None
+    if current_user.role == "business":
+        requester_ids = [current_user.id]
+    elif current_user.role == "domain_spec":
+        requester_ids = _get_specialist_scope_ids(db, current_user.id)
+    stats = service.get_stats(requester_ids=requester_ids)
     return RequestStatsResponse(**stats)
 
 
@@ -138,12 +160,20 @@ def get_request(
             detail="申请不存在"
         )
 
-    # 检查权限：业务同事只能查看自己的申请
+    # 检查权限：按角色限定可见范围
     if current_user.role == "business" and request.requester_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="无权查看此申请"
         )
+    # domain_spec 只能查看自己及其归属业务用户的申请
+    if current_user.role == "domain_spec":
+        scope_ids = _get_specialist_scope_ids(db, current_user.id)
+        if request.requester_id not in scope_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权查看此申请"
+            )
 
     return RequestResponse.model_validate(request)
 

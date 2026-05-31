@@ -18,16 +18,19 @@ class DnsService:
     def get_records(
         self,
         domain_id: Optional[int] = None,
+        domain_ids: Optional[List[int]] = None,
         record_type: Optional[str] = None,
         host: Optional[str] = None,
         skip: int = 0,
         limit: int = 100
     ) -> List[DnsRecord]:
-        """获取DNS记录列表"""
+        """获取DNS记录列表（domain_id 单值优先；domain_ids 用于 domain_spec 多域名范围过滤）"""
         query = self.db.query(DnsRecord)
 
         if domain_id:
             query = query.filter(DnsRecord.domain_id == domain_id)
+        elif domain_ids is not None:
+            query = query.filter(DnsRecord.domain_id.in_(domain_ids))
         if record_type:
             query = query.filter(DnsRecord.record_type == record_type)
         if host:
@@ -38,14 +41,17 @@ class DnsService:
     def get_record_count(
         self,
         domain_id: Optional[int] = None,
+        domain_ids: Optional[List[int]] = None,
         record_type: Optional[str] = None,
         host: Optional[str] = None
     ) -> int:
-        """获取DNS记录总数"""
+        """获取DNS记录总数（domain_ids 用于 domain_spec 多域名范围过滤）"""
         query = self.db.query(DnsRecord)
 
         if domain_id:
             query = query.filter(DnsRecord.domain_id == domain_id)
+        elif domain_ids is not None:
+            query = query.filter(DnsRecord.domain_id.in_(domain_ids))
         if record_type:
             query = query.filter(DnsRecord.record_type == record_type)
         if host:

@@ -136,16 +136,19 @@ class DomainService:
 
 
 
-    def get_expiring_domains(self, days: int = 30) -> List[Domain]:
-        """获取即将到期的域名"""
+    def get_expiring_domains(self, days: int = 30, owner_id: Optional[int] = None) -> List[Domain]:
+        """获取即将到期的域名（domain_spec 传 owner_id 只看自己的）"""
         from datetime import timedelta
         threshold = datetime.now() + timedelta(days=days)
-        
-        return self.db.query(Domain).filter(
+
+        query = self.db.query(Domain).filter(
             Domain.expiration_date <= threshold,
             Domain.expiration_date > datetime.now(),
             Domain.status == "active"
-        ).order_by(Domain.expiration_date.asc()).all()
+        )
+        if owner_id is not None:
+            query = query.filter(Domain.owner_id == owner_id)
+        return query.order_by(Domain.expiration_date.asc()).all()
 
     # ========== 注册账号管理 ==========
 

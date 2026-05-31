@@ -5,9 +5,7 @@ SSL证书管理API路由
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import List, Optional
-from sqlalchemy.orm import Session
-from app.core.database import get_db
-from app.api.dependencies import get_current_active_user
+from app.api.dependencies import require_admin
 from app.models.user import User
 from app.services.ssl_service import ssl_service
 
@@ -70,7 +68,7 @@ def _to_cert_info(raw: dict, threshold_days: int) -> dict:
 @router.get("/certificates", response_model=CertificateMonitorResponse)
 async def list_certificates(
     threshold_days: int = 30,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     获取 SSL 证书监控信息（仅限项目运维域名，非业务域名）
@@ -100,7 +98,7 @@ async def list_certificates(
 @router.post("/alerts", response_model=CertificateAlertResponse)
 async def get_certificate_alerts(
     request: CertificateAlertRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     获取证书告警信息
@@ -123,7 +121,7 @@ async def get_certificate_alerts(
 
 @router.get("/health")
 async def check_ssl_health(
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(require_admin),
 ):
     """
     检查SSL服务健康状态

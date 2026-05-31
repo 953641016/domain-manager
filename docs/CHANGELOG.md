@@ -12,6 +12,29 @@
 
 ---
 
+## [1.3.4] — 2026-05-31
+
+### 安全/权限
+- **域名专员数据隔离**：全面落实"每位专员只能看自己的数据"原则，修复以下越权缺口：
+  - `GET /domains/{id}`：domain_spec 访问他人域名返回 403（原无校验）
+  - `GET /domains/expiring/list`：domain_spec 只返回自己名下的到期域名（原返回全部）
+  - `GET /requests`：domain_spec 只返回自己及其归属业务用户的申请（原返回全部）
+  - `GET /requests/stats`：domain_spec 只统计自己归属范围的申请（原统计全局）
+  - `GET /requests/{id}`：domain_spec 访问不属于自己范围的申请返回 403（原无校验）
+  - `GET /dns/records`：domain_spec 只返回自己域名的 DNS 记录（原返回全部）
+  - `GET /dns/records/{id}`：domain_spec 访问他人域名的 DNS 记录返回 403（原无校验）
+  - `GET /dns/domain/{id}`：domain_spec 访问他人域名的 DNS 记录返回 403（原无校验）
+- **SSL 证书接口权限收紧**：`GET /ssl/certificates`、`POST /ssl/alerts`、`GET /ssl/health` 由任意登录用户可访问改为 admin/super_admin 专属（这些接口读取宿主机服务器证书，与业务域名无关）
+
+### 技术
+- `DomainService.get_expiring_domains()` 新增 `owner_id` 参数，domain_spec 视角只查自己名下域名
+- `RequestService.get_requests()`、`get_request_count()` 新增 `requester_ids: List[int]` 参数，用于 domain_spec 多用户范围过滤
+- `RequestService.get_stats()` 新增 `requester_ids` 参数，支持 domain_spec 作用域统计
+- `DnsService.get_records()`、`get_record_count()` 新增 `domain_ids: List[int]` 参数，用于 domain_spec 多域名范围过滤
+- `requests.py` 新增工具函数 `_get_specialist_scope_ids()` 封装"专员 + 归属业务用户 ID"查询逻辑
+
+---
+
 ## [1.3.3] — 2026-05-31
 
 ### 新增

@@ -21,18 +21,22 @@ class RequestService:
         status: Optional[str] = None,
         request_type: Optional[str] = None,
         requester_id: Optional[int] = None,
+        requester_ids: Optional[List[int]] = None,
         domain_name: Optional[str] = None,
         skip: int = 0,
         limit: int = 100
     ) -> List[Request]:
-        """获取申请列表"""
+        """获取申请列表（requester_ids 优先于 requester_id，用于 domain_spec 按归属范围过滤）"""
         query = self.db.query(Request)
 
         if status:
             query = query.filter(Request.status == status)
         if request_type:
             query = query.filter(Request.type == request_type)
-        if requester_id:
+        if requester_ids is not None:
+            # domain_spec 视角：只查归属自己的申请者
+            query = query.filter(Request.requester_id.in_(requester_ids))
+        elif requester_id:
             query = query.filter(Request.requester_id == requester_id)
         if domain_name:
             query = query.filter(Request.domain_name.contains(domain_name))
@@ -44,16 +48,19 @@ class RequestService:
         status: Optional[str] = None,
         request_type: Optional[str] = None,
         requester_id: Optional[int] = None,
+        requester_ids: Optional[List[int]] = None,
         domain_name: Optional[str] = None
     ) -> int:
-        """获取申请总数"""
+        """获取申请总数（requester_ids 优先于 requester_id）"""
         query = self.db.query(Request)
 
         if status:
             query = query.filter(Request.status == status)
         if request_type:
             query = query.filter(Request.type == request_type)
-        if requester_id:
+        if requester_ids is not None:
+            query = query.filter(Request.requester_id.in_(requester_ids))
+        elif requester_id:
             query = query.filter(Request.requester_id == requester_id)
         if domain_name:
             query = query.filter(Request.domain_name.contains(domain_name))
@@ -169,14 +176,18 @@ class RequestService:
         self.db.refresh(request)
         return request
 
-    def get_stats(self) -> dict:
-        """获取申请统计"""
-        total = self.db.query(Request).count()
-        pending = self.db.query(Request).filter(Request.status == "pending").count()
-        approved = self.db.query(Request).filter(Request.status == "approved").count()
-        rejected = self.db.query(Request).filter(Request.status == "rejected").count()
-        completed = self.db.query(Request).filter(Request.status == "completed").count()
-        failed = self.db.query(Request).filter(Request.status == "failed").count()
+    def get_stats(self, requester_ids: Optional[List[int]] = None) -> dict:
+        """获取申请统计（domain_spec 传 requester_ids 只统计自己归属范围）"""
+        base = self.db.query(Request)
+        if requester_ids is not None:
+            base = base.filter(Request.requester_id.in_(requester_ids))
+
+        total     = base.count()
+        pending   = base.filter(Request.status == "pending").count()
+        approved  = base.filter(Request.status == "approved").count()
+        rejected  = base.filter(Request.status == "rejected").count()
+        completed = base.filter(Request.status == "completed").count()
+        failed    = base.filter(Request.status == "failed").count()
 
         return {
             "total": total,
