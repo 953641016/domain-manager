@@ -20,6 +20,18 @@ from app.models.user_confirmation import (
 
 CONFIRMATION_EXPIRE_HOURS = 24  # 确认有效期
 
+# 用户字段名 → 中文标签
+_USER_FIELD_LABELS: Dict[str, str] = {
+    "name":                   "姓名",
+    "email":                  "邮箱",
+    "phone":                  "手机",
+    "department":             "部门",
+    "role":                   "角色",
+    "is_active":              "状态",
+    "remark":                 "备注",
+    "assigned_specialist_id": "归属专员",
+}
+
 
 class UserOperationConfirmationService:
     def __init__(self, db: Session):
@@ -584,10 +596,24 @@ class UserOperationConfirmationService:
                 "update_user":     "",
             }.get(action, "")
             changes = details.get("changes", {})
-            change_str = "；".join(
-                f"{k}→{v}" for k, v in changes.items()
-            ) if changes and action == "update_user" else ""
-            op_target = f"{name}（{role}{suffix}）" + (f"\n变更：{change_str}" if change_str else "")
+            if changes and action == "update_user":
+                change_parts = []
+                for k, v in changes.items():
+                    # 过滤空值
+                    if v is None or v == "":
+                        continue
+                    label = _USER_FIELD_LABELS.get(k, k)
+                    if k == "role":
+                        display_v = self._role_name(v)
+                    elif k == "is_active":
+                        display_v = "启用" if v else "禁用"
+                    else:
+                        display_v = str(v)
+                    change_parts.append(f"{label} → {display_v}")
+                change_str = "\n".join(f"· {p}" for p in change_parts)
+            else:
+                change_str = ""
+            op_target = f"{name}（{role}{suffix}）" + (f"\n变更内容：\n{change_str}" if change_str else "")
         else:
             acc_name = details.get("data", {}).get("name") or details.get("account_name", "")
             op_target = acc_name or "—"
