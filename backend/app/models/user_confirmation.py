@@ -65,6 +65,8 @@ class UserOperationConfirmation(Base):
 
     # 状态
     status = Column(String(20), nullable=False, default=ConfirmationStatus.PENDING, index=True)
+    execution_status = Column(String(20), nullable=True, default="pending", comment="执行结果: pending/success/failed")
+    source = Column(String(30), nullable=True, default="web", comment="来源: web/feishu_doc/feishu_client/qr_scan")
 
     # 确认者信息
     approver_user_id = Column(Integer, nullable=True)
