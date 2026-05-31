@@ -543,34 +543,30 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(super_admin, "feishu_open_id", None) else "user_id"
 
-        op_labels = {
-            "add_reg_account": "新增注册账号",
-            "update_reg_account": "修改注册账号",
-            "delete_reg_account": "删除注册账号",
-            "add_dns_account": "新增解析账号",
-            "update_dns_account": "修改解析账号",
-            "delete_dns_account": "删除解析账号",
-            "set_default_config": "修改默认配置",
-        }
-        op_label = op_labels.get(confirmation.operation_type, confirmation.operation_type)
+        # 用统一的描述方法生成操作摘要（已处理账号类、用户类、服务商类所有情况）
+        desc = self.format_operation_description(confirmation)
         details = confirmation.operation_details or {}
-        account_name = details.get("data", {}).get("name") or details.get("account_name", "")
 
         lines = [
             f"**操作人：** {confirmation.initiator_name}",
-            f"**操作类型：** {op_label}",
+            f"**操作内容：** {desc}",
         ]
-        if account_name:
-            lines.append(f"**账号名称：** {account_name}")
         if api_key_masked:
             lines.append(f"**API Key：** {api_key_masked}")
-        if details.get("account_id"):
-            lines.append(f"**账号ID：** {details['account_id']}")
+
+        # 根据操作类型选择标题
+        action = details.get("action", "")
+        if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
+            card_title = "👤 用户管理授权申请"
+        elif confirmation.operation_type in ("add_provider", "update_provider", "delete_provider"):
+            card_title = "🏷️ 服务商配置授权申请"
+        else:
+            card_title = "🔐 账号配置授权申请"
 
         card = {
             "config": {"wide_screen_mode": True},
             "header": {
-                "title": {"tag": "plain_text", "content": "🔐 账号配置授权申请"},
+                "title": {"tag": "plain_text", "content": card_title},
                 "template": "orange"
             },
             "elements": [
