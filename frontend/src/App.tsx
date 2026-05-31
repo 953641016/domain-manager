@@ -26,6 +26,7 @@ import ConfigPage from '@/pages/Config';
 import UserManagement from '@/pages/config/UserManagement';
 import ForbiddenPage from '@/pages/Errors/Forbidden';
 import NotFoundPage from '@/pages/Errors/NotFound';
+import FeishuConfirmPage from '@/pages/FeishuConfirm';
 
 // 路由守卫组件
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -41,6 +42,8 @@ function AppRouter() {
       <Routes>
         {/* 公开路由 */}
         <Route path="/login" element={<LoginPage />} />
+        {/* 飞书文档按钮确认页（无需主布局，独立页面） */}
+        <Route path="/feishu/confirm" element={<FeishuConfirmPage />} />
 
         {/* 受保护的路由 */}
         <Route

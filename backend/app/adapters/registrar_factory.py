@@ -85,7 +85,7 @@ class RegistrarFactory:
                 "name": "Cloudflare",
                 "description": "Cloudflare Registrar，提供低成本域名注册",
                 "supports_registration": True,
-                "supports_transfer": True,
+                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
                 "supports_dns": True
             },
             "godaddy": {
@@ -93,7 +93,7 @@ class RegistrarFactory:
                 "name": "GoDaddy",
                 "description": "GoDaddy，全球最大的域名注册商",
                 "supports_registration": True,
-                "supports_transfer": True,
+                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
                 "supports_dns": True
             },
             "namecheap": {
@@ -101,7 +101,7 @@ class RegistrarFactory:
                 "name": "Namecheap",
                 "description": "Namecheap，提供低成本域名注册",
                 "supports_registration": True,
-                "supports_transfer": True,
+                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
                 "supports_dns": True
             },
             "enom": {
@@ -109,7 +109,7 @@ class RegistrarFactory:
                 "name": "Enom",
                 "description": "Enom，专业的域名注册商",
                 "supports_registration": True,
-                "supports_transfer": True,
+                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
                 "supports_dns": True
             }
         }

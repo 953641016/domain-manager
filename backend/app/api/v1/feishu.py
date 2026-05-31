@@ -5,18 +5,31 @@
 from fastapi import APIRouter, HTTPException, Query, Request, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from app.config import Config
 from app.services.feishu_service import feishu_service
 from app.bots.feishu import feishu_bot
-from app.core.database import get_db
+from app.core.database import get_db, SessionLocal
 
 
 router = APIRouter(
     prefix="/feishu",
     tags=["飞书集成"],
 )
+
+# ── 已知 section 列表 ──────────────────────────────────────
+SECTIONS_WITH_BITABLE = {
+    "vercel":           {"label": "Vercel 域名解析",     "request_type": "dns_record"},
+    "clerk":            {"label": "Clerk 域名解析",      "request_type": "dns_record"},
+    "cf_redirect":      {"label": "CF 域名跳转解析",     "request_type": "dns_record"},
+    "gsc":              {"label": "GSC 网站认证解析",    "request_type": "dns_record"},
+    "api_domain":       {"label": "接口域名解析",         "request_type": "dns_record"},
+    "email":            {"label": "网站邮箱支持解析",    "request_type": "dns_record"},
+}
+SECTIONS_NO_BITABLE = {
+    "domain_register":  {"label": "域名注册",            "request_type": "domain_register"},
+}
 
 
 class FeishuUserInfo(BaseModel):
@@ -290,6 +303,314 @@ async def add_user_callback(
         return HTMLResponse(content=html)
 
 
+# ════════════════════════════════════════════════════════════
+# 确认页主入口
+# ════════════════════════════════════════════════════════════
+
+@router.get("/confirm-request")
+def confirm_request_page(
+    section: str = Query(..., description="申请类型，如 vercel/domain_register"),
+    current_user=Depends(lambda: None),   # OAuth 由前端处理，后端只验 token
+    db: Session = Depends(get_db),
+):
+    """
+    返回确认页所需数据：
+    - 该 section 是否已绑定 Bitable
+    - 若已绑定，返回 Bitable 记录摘要（供前端展示）
+    - 若未绑定，告知前端需要先绑定
+    """
+    # 实际调用时 current_user 由 get_current_active_user 注入，
+    # 这里写成独立端点方便前端 OAuth 回调后携 JWT 访问
+    raise HTTPException(status_code=501, detail="请通过前端页面访问")
+
+
+class ConfirmPageData(BaseModel):
+    section: str
+    label: str
+    needs_binding: bool
+    records: List[Dict[str, Any]] = []
+
+
+@router.get("/confirm-data", response_model=ConfirmPageData)
+def get_confirm_data(
+    section: str = Query(...),
+    db: Session = Depends(get_db),
+    current_user=Depends(__import__("app.api.dependencies", fromlist=["get_current_active_user"]).get_current_active_user),
+):
+    """
+    前端确认页加载时调用（需 JWT）。
+    返回：section 标签、是否已绑定、已绑定时的 Bitable 记录列表。
+    """
+    from app.models.feishu_bitable import FeishuBitableConfig
+
+    all_sections = {**SECTIONS_WITH_BITABLE, **SECTIONS_NO_BITABLE}
+    meta = all_sections.get(section)
+    if not meta:
+        raise HTTPException(status_code=400, detail=f"未知的 section: {section}")
+
+    # 无 Bitable 的申请类型（域名注册）
+    if section in SECTIONS_NO_BITABLE:
+        return ConfirmPageData(section=section, label=meta["label"], needs_binding=False)
+
+    # 查绑定记录
+    cfg = db.query(FeishuBitableConfig).filter_by(
+        section=section, user_id=current_user.id
+    ).first()
+
+    if not cfg:
+        return ConfirmPageData(section=section, label=meta["label"], needs_binding=True)
+
+    # 读取 Bitable 记录
+    try:
+        raw_rows = feishu_service.read_bitable_records(cfg.app_token, cfg.table_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"读取多维表格失败：{e}")
+
+    records = []
+    for row in raw_rows:
+        fields = row.get("fields", {})
+        hostname = str(fields.get("Hostname") or fields.get("hostname") or "").strip()
+        rtype    = str(fields.get("Type")     or fields.get("type")     or "").strip()
+        target   = str(fields.get("Target")   or fields.get("target")   or "").strip()
+        if hostname and hostname not in ("—", "-") and rtype and target:
+            records.append({"hostname": hostname, "type": rtype.upper(), "target": target})
+
+    return ConfirmPageData(
+        section=section,
+        label=meta["label"],
+        needs_binding=False,
+        records=records,
+    )
+
+
+class BindBitableBody(BaseModel):
+    section: str
+    bitable_url: str   # 用户粘贴的飞书 Bitable URL
+
+
+@router.post("/bind-bitable")
+def bind_bitable(
+    body: BindBitableBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(__import__("app.api.dependencies", fromlist=["get_current_active_user"]).get_current_active_user),
+):
+    """
+    用户首次使用时绑定 Bitable：解析 URL 提取 app_token + table_id，存库。
+    """
+    import re
+    from app.models.feishu_bitable import FeishuBitableConfig
+
+    if body.section not in SECTIONS_WITH_BITABLE:
+        raise HTTPException(status_code=400, detail=f"section '{body.section}' 不需要绑定 Bitable")
+
+    # 解析飞书 Bitable URL
+    # 格式：https://xxx.feishu.cn/base/{app_token}?table={table_id}&...
+    m = re.search(r"/base/([A-Za-z0-9]+)", body.bitable_url)
+    if not m:
+        raise HTTPException(status_code=400, detail="无法解析 Bitable URL，请确认复制的是多维表格新页面的完整地址")
+    app_token = m.group(1)
+
+    t = re.search(r"[?&]table=([A-Za-z0-9]+)", body.bitable_url)
+    if not t:
+        raise HTTPException(status_code=400, detail="URL 中未找到 table 参数，请确认复制的是包含表格 ID 的完整地址")
+    table_id = t.group(1)
+
+    # 验证可访问性
+    try:
+        feishu_service.read_bitable_records(app_token, table_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"无法访问该多维表格，请检查应用权限：{e}")
+
+    # 保存或更新绑定
+    cfg = db.query(FeishuBitableConfig).filter_by(
+        section=body.section, user_id=current_user.id
+    ).first()
+    if cfg:
+        cfg.app_token = app_token
+        cfg.table_id  = table_id
+    else:
+        db.add(FeishuBitableConfig(
+            section=body.section,
+            user_id=current_user.id,
+            app_token=app_token,
+            table_id=table_id,
+        ))
+    db.commit()
+
+    return {"success": True, "app_token": app_token, "table_id": table_id}
+
+
+class SubmitRequestBody(BaseModel):
+    section: str
+    domain: str
+    records: List[Dict[str, Any]] = []   # DNS 类申请传此字段；域名注册类忽略
+
+
+@router.post("/submit-request")
+def submit_request(
+    body: SubmitRequestBody,
+    db: Session = Depends(get_db),
+    current_user=Depends(__import__("app.api.dependencies", fromlist=["get_current_active_user"]).get_current_active_user),
+):
+    """
+    确认页用户点"确认提交"后调用。
+    """
+    from app.services.user_service import UserService
+    from app.services.request_service import RequestService
+    from app.schemas.request import RequestCreate
+
+    if not getattr(current_user, "assigned_specialist_id", None):
+        raise HTTPException(status_code=403, detail="您尚未分配归属专员，无法提交申请，请联系管理员配置")
+
+    all_sections = {**SECTIONS_WITH_BITABLE, **SECTIONS_NO_BITABLE}
+    meta = all_sections.get(body.section)
+    if not meta:
+        raise HTTPException(status_code=400, detail=f"未知的 section: {body.section}")
+
+    req_type = meta["request_type"]
+    user_svc = UserService(db)
+    req_svc  = RequestService(db)
+
+    if req_type == "domain_register":
+        if not body.domain:
+            raise HTTPException(status_code=400, detail="请填写要注册的域名")
+        # 幂等：是否已有 pending 申请
+        existing = req_svc.get_pending_domain_request(body.domain)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"域名 {body.domain} 已有待审批申请（ID: {existing.id}）")
+        request_data = {"domain": body.domain}
+    else:
+        if not body.records:
+            raise HTTPException(status_code=400, detail="没有有效的解析记录，请先在多维表格中填写")
+        request_data = {
+            "dns_provider": body.section,
+            "domain": body.domain,
+            "records": body.records,
+        }
+
+    req = req_svc.create_request(
+        data=RequestCreate(
+            type=req_type,
+            domain_name=body.domain,
+            request_data=request_data,
+            source="feishu_doc",
+        ),
+        requester_id=current_user.id,
+        requester_name=current_user.name,
+    )
+
+    # 发审批卡片给归属专员
+    specialist = user_svc.get_user(current_user.assigned_specialist_id)
+    if specialist:
+        receive_id = getattr(specialist, "feishu_open_id", None) or getattr(specialist, "feishu_user_id", None)
+        receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
+        if receive_id:
+            if req_type == "dns_record":
+                feishu_service.send_dns_approval_card(
+                    receive_id=receive_id,
+                    request_id=req.id,
+                    requester_name=current_user.name,
+                    domain=body.domain,
+                    dns_provider=body.section,
+                    records=body.records,
+                    receive_id_type=receive_type,
+                )
+            else:
+                feishu_service.send_text_message(
+                    receive_id=receive_id,
+                    content=f"📋 域名注册申请\n申请人：{current_user.name}\n域名：{body.domain}\n请登录 Web 后台审批。",
+                    receive_id_type=receive_type,
+                )
+
+    return {"success": True, "request_id": req.id}
+
+
+class TableRequestBody(BaseModel):
+    """多维表格按钮触发的申请请求体（由飞书自动化注入）"""
+    feishu_user_id: str          # 点击按钮的用户飞书 user_id / open_id
+    app_token: str               # 多维表格所属 Bitable 的 app_token
+    table_id: str                # 具体哪张表
+    dns_provider: str            # 解析平台，写死在自动化配置里，如 "vercel"
+    domain: str                  # 域名，写死在自动化配置里，如 "krea2.net"
+
+
+@router.post("/table-request")
+async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get_db)):
+    """
+    多维表格"提交全部记录"按钮触发的入口。
+
+    飞书自动化 HTTP 节点调用此接口，后端：
+    1. 验证用户身份 & 归属专员
+    2. 从 Bitable 读取所有 DNS 记录
+    3. 创建 dns_record 申请
+    4. 向归属专员发送审批卡片
+    """
+    from app.services.user_service import UserService
+    from app.services.request_service import RequestService
+    from app.schemas.request import RequestCreate
+
+    user_svc = UserService(db)
+
+    # 用 feishu_user_id 或 open_id 找用户
+    user = user_svc.get_user_by_feishu_userid(body.feishu_user_id)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="用户不存在或已禁用，请联系管理员")
+
+    if not getattr(user, "assigned_specialist_id", None):
+        raise HTTPException(status_code=403, detail="您尚未分配归属专员，无法提交申请，请联系管理员")
+
+    # 读取 Bitable 所有记录
+    raw_rows = feishu_service.read_bitable_records(body.app_token, body.table_id)
+
+    # 过滤：去掉空行和专用提交行（Hostname 为空或仅含"—"）
+    records = []
+    for row in raw_rows:
+        fields = row.get("fields", {})
+        hostname = str(fields.get("Hostname") or fields.get("hostname") or "").strip()
+        rtype    = str(fields.get("Type")     or fields.get("type")     or "").strip()
+        target   = str(fields.get("Target")   or fields.get("target")   or "").strip()
+        if hostname and hostname not in ("—", "-") and rtype and target:
+            records.append({"hostname": hostname, "type": rtype.upper(), "target": target})
+
+    if not records:
+        raise HTTPException(status_code=400, detail="表格中没有有效的解析记录，请先填写后再提交")
+
+    # 创建申请记录
+    req_svc = RequestService(db)
+    req = req_svc.create_request(
+        data=RequestCreate(
+            type="dns_record",
+            domain_name=body.domain,
+            request_data={
+                "dns_provider": body.dns_provider,
+                "domain": body.domain,
+                "records": records,
+            },
+            source="feishu_table",
+        ),
+        requester_id=user.id,
+        requester_name=user.name,
+    )
+
+    # 找归属专员并发审批卡片
+    specialist = user_svc.get_user(user.assigned_specialist_id)
+    if specialist:
+        receive_id = getattr(specialist, "feishu_open_id", None) or getattr(specialist, "feishu_user_id", None)
+        receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
+        if receive_id:
+            feishu_service.send_dns_approval_card(
+                receive_id=receive_id,
+                request_id=req.id,
+                requester_name=user.name,
+                domain=body.domain,
+                dns_provider=body.dns_provider,
+                records=records,
+                receive_id_type=receive_type,
+            )
+
+    return {"success": True, "request_id": req.id, "records_count": len(records)}
+
+
 async def _handle_card_action(body: dict) -> dict:
     """
     处理飞书卡片按钮回调
@@ -301,6 +622,11 @@ async def _handle_card_action(body: dict) -> dict:
         operator = body.get("operator", {}) or body.get("event", {}).get("operator", {})
 
         card_action = value.get("action", "")
+
+        # DNS 解析申请审批（专员操作）
+        if card_action in ("approve_dns_request", "reject_dns_request"):
+            return await _handle_dns_card_action(card_action, value, operator)
+
         confirmation_id = value.get("confirmation_id")
         if not confirmation_id or card_action not in ("approve_account_op", "reject_account_op"):
             return {"success": True, "message": "非账号授权卡片，忽略"}
@@ -343,3 +669,56 @@ async def _handle_card_action(body: dict) -> dict:
         import logging
         logging.getLogger(__name__).exception("处理卡片回调失败")
         return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}
+
+
+async def _handle_dns_card_action(card_action: str, value: dict, operator: dict) -> dict:
+    """专员点击 DNS 审批卡片后的处理（批准/拒绝）。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    request_id = value.get("request_id")
+    if not request_id:
+        return {"toast": {"type": "error", "content": "卡片数据异常，缺少 request_id"}}
+
+    operator_open_id = operator.get("open_id", "")
+
+    db = SessionLocal()
+    try:
+        from app.services.user_service import UserService
+        from app.services.request_service import RequestService
+        from app.services.execution_service import ExecutionService
+
+        user_svc = UserService(db)
+        req_svc  = RequestService(db)
+
+        # 找操作人（open_id / user_id 均可）
+        specialist = user_svc.get_user_by_any_feishu_id(operator_open_id)
+        if not specialist or specialist.role not in ("domain_spec", "super_admin"):
+            return {"toast": {"type": "error", "content": "只有域名专员可以审批此申请"}}
+
+        request = req_svc.get_request(request_id)
+        if not request:
+            return {"toast": {"type": "error", "content": "申请不存在或已处理"}}
+
+        # 校验归属：申请人的归属专员必须是当前操作人（超管除外）
+        if specialist.role != "super_admin":
+            requester = user_svc.get_user(request.requester_id)
+            if not requester or requester.assigned_specialist_id != specialist.id:
+                return {"toast": {"type": "error", "content": "该申请不属于您负责的业务同事"}}
+
+        if card_action == "approve_dns_request":
+            req_svc.approve_request(request_id, specialist.id, specialist.name)
+            # 自动执行
+            try:
+                ExecutionService(db).execute_and_notify(request)
+            except Exception as e:
+                logger.exception("DNS 申请执行失败: %s", e)
+            return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
+        else:
+            req_svc.reject_request(request_id, specialist.id, specialist.name, reason="专员拒绝")
+            return {"toast": {"type": "info", "content": "已拒绝该申请"}}
+    except Exception as e:
+        logger.exception("处理 DNS 审批卡片失败")
+        return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}
+    finally:
+        db.close()

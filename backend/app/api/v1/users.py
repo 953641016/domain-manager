@@ -1,5 +1,6 @@
 """
 用户管理 API
+所有写操作（增改删）均需超管飞书确认（带外确认原则）
 """
 
 from typing import Optional
@@ -8,7 +9,8 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.api.dependencies import (
     get_current_active_user,
-    require_manage_users
+    require_manage_users,
+    require_view_users,
 )
 from app.schemas.user import (
     UserCreate,
@@ -19,6 +21,8 @@ from app.schemas.user import (
 )
 from app.services.user_service import UserService
 from app.models.user import User
+from app.models.user_confirmation import ConfirmationOperationType
+from app.services.user_confirmation_service import UserOperationConfirmationService
 
 router = APIRouter(
     prefix="/users",
@@ -26,161 +30,179 @@ router = APIRouter(
 )
 
 
+def _user_confirmation(db, current_user: User, op_type: ConfirmationOperationType, details: dict) -> dict:
+    """创建用户操作的超管确认请求并发飞书卡片"""
+    svc = UserOperationConfirmationService(db)
+    conf = svc.create_confirmation(
+        operation_type=op_type,
+        initiator_user_id=current_user.id,
+        initiator_name=current_user.name,
+        initiator_feishu_userid=getattr(current_user, "feishu_user_id", "") or "",
+        target_user_data={"initiator_id": current_user.id, "initiator_role": current_user.role},
+        operation_details=details,
+        requires_super_admin=True,
+        remark="web",
+    )
+    svc.send_account_op_card_to_super_admin(conf)
+    return {
+        "status": "pending_approval",
+        "confirmation_id": conf.id,
+        "message": "已向超级管理员发送授权申请，请等待审批",
+    }
+
+
+# ==================== 查询（只读，无需确认）====================
+
 @router.get("", response_model=UserListResponse)
 def get_users(
-    skip: int = Query(0, ge=0, description="跳过数量"),
-    limit: int = Query(100, ge=1, le=1000, description="返回数量"),
-    role: Optional[str] = Query(None, description="角色筛选"),
-    is_active: Optional[bool] = Query(None, description="是否启用筛选"),
-    search: Optional[str] = Query(None, description="搜索关键词"),
-    current_user: User = Depends(require_manage_users),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    role: Optional[str] = Query(None),
+    is_active: Optional[bool] = Query(None),
+    search: Optional[str] = Query(None),
+    current_user: User = Depends(require_view_users),
     db: Session = Depends(get_db),
 ):
-    """
-    获取用户列表
-    需要用户管理权限
-    """
+    """获取用户列表（admin/super_admin 可见）"""
     service = UserService(db)
-    users = service.get_users(
-        skip=skip,
-        limit=limit,
-        role=role,
-        is_active=is_active,
-        search=search
-    )
-    total = service.get_users_count(
-        role=role,
-        is_active=is_active,
-        search=search
-    )
-
+    users = service.get_users(skip=skip, limit=limit, role=role, is_active=is_active, search=search)
+    total = service.get_users_count(role=role, is_active=is_active, search=search)
     return UserListResponse(total=total, items=users)
 
 
 @router.get("/roles", response_model=list[RoleInfo])
-def get_roles(
-    current_user: User = Depends(get_current_active_user)
-):
-    """
-    获取所有角色信息
-    需要已认证
-    """
+def get_roles(current_user: User = Depends(get_current_active_user)):
+    """获取所有角色信息"""
     return UserService.get_all_roles()
+
+
+@router.get("/me", response_model=UserResponse)
+def get_current_user_info(current_user: User = Depends(get_current_active_user)):
+    """获取当前登录用户信息"""
+    return current_user
+
+
+@router.get("/specialists", response_model=list)
+def get_specialists(
+    current_user: User = Depends(require_view_users),
+    db: Session = Depends(get_db),
+):
+    """获取域名专员列表（用于设置归属专员下拉）"""
+    service = UserService(db)
+    specs = service.get_users(role="domain_spec", is_active=True, limit=500)
+    return [{"id": u.id, "name": u.name} for u in specs]
 
 
 @router.get("/{user_id}", response_model=UserResponse)
 def get_user(
     user_id: int,
-    current_user: User = Depends(require_manage_users),
+    current_user: User = Depends(require_view_users),
     db: Session = Depends(get_db),
 ):
-    """
-    获取用户详情
-    需要用户管理权限
-    """
+    """获取用户详情"""
     service = UserService(db)
     user = service.get_user(user_id)
-
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
-
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
     return user
 
 
-@router.get("/me", response_model=UserResponse)
-def get_current_user_info(
-    current_user: User = Depends(get_current_active_user),
-):
-    """
-    获取当前登录用户信息
-    """
-    return current_user
+# ==================== 写操作（均需超管飞书确认）====================
 
-
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("")
 def create_user(
     user_in: UserCreate,
     current_user: User = Depends(require_manage_users),
     db: Session = Depends(get_db),
 ):
     """
-    创建用户
-    需要用户管理权限
+    创建用户（需超管飞书确认）
+    业务人员(business)须在确认后手动设置归属专员
     """
-    service = UserService(db)
-    try:
-        user, needs_confirmation = service.create_user(user_in)
-        return user
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+    return _user_confirmation(
+        db, current_user,
+        ConfirmationOperationType.ADD_DOMAIN_SPEC
+        if getattr(user_in, "role", "business") in ("domain_spec", "admin", "super_admin")
+        else ConfirmationOperationType.ADD_DOMAIN_SPEC,
+        details={
+            "action": "create_user",
+            "user_data": {
+                "name": user_in.name,
+                "role": user_in.role,
+                "feishu_user_id": getattr(user_in, "feishu_userid", None) or getattr(user_in, "feishu_user_id", None),
+                "email": getattr(user_in, "email", None),
+                "department": getattr(user_in, "department", None),
+            },
+        },
+    )
 
 
-@router.put("/{user_id}", response_model=UserResponse)
+@router.put("/{user_id}")
 def update_user(
     user_id: int,
     user_in: UserUpdate,
     current_user: User = Depends(require_manage_users),
     db: Session = Depends(get_db),
 ):
-    """
-    更新用户
-    需要用户管理权限
-    """
+    """更新用户信息（需超管飞书确认）"""
     service = UserService(db)
-    user, needs_confirmation, change_details = service.update_user(user_id, user_in)
+    target = service.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    return _user_confirmation(
+        db, current_user,
+        ConfirmationOperationType.UPDATE_USER_ROLE
+        if user_in.role else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
+        details={
+            "action": "update_user",
+            "user_id": user_id,
+            "target_name": target.name,
+            "changes": user_in.model_dump(exclude_none=True),
+        },
+    )
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
 
-    return user
-
-
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{user_id}")
 def delete_user(
     user_id: int,
     current_user: User = Depends(require_manage_users),
     db: Session = Depends(get_db),
 ):
-    """
-    删除用户（软删除）
-    需要用户管理权限
-    """
+    """删除/禁用用户（需超管飞书确认）"""
     service = UserService(db)
-    success = service.delete_user(user_id)
+    target = service.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    return _user_confirmation(
+        db, current_user,
+        ConfirmationOperationType.REMOVE_ADMIN
+        if target.role in ("admin", "super_admin") else ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
+        details={
+            "action": "delete_user",
+            "user_id": user_id,
+            "target_name": target.name,
+            "target_role": target.role,
+        },
+    )
 
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
 
-
-@router.post("/{user_id}/activate", response_model=UserResponse)
+@router.post("/{user_id}/activate")
 def activate_user(
     user_id: int,
     current_user: User = Depends(require_manage_users),
     db: Session = Depends(get_db),
 ):
-    """
-    激活用户
-    需要用户管理权限
-    """
+    """激活用户（需超管飞书确认）"""
     service = UserService(db)
-    user = service.activate_user(user_id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="用户不存在"
-        )
-
-    return user
+    target = service.get_user(user_id)
+    if not target:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="用户不存在")
+    return _user_confirmation(
+        db, current_user,
+        ConfirmationOperationType.UPDATE_DOMAIN_SPEC,
+        details={
+            "action": "activate_user",
+            "user_id": user_id,
+            "target_name": target.name,
+        },
+    )

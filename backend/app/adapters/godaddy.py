@@ -191,7 +191,12 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
             }
 
     def transfer_domain(self, domain: str, auth_code: str) -> Dict[str, Any]:
-        """转入域名"""
+        """
+        转入域名
+
+        ⚠️ 已禁用：功能代码保留但API层未暴露
+        如需启用请参考 base.py 中的说明
+        """
         url = f"{self.base_url}/domains/transfer"
 
         payload = {
@@ -223,7 +228,12 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
             }
 
     def get_transfer_code(self, domain: str) -> Dict[str, Any]:
-        """获取域名转移授权码"""
+        """
+        获取域名转移授权码
+
+        ⚠️ 已禁用：功能代码保留但API层未暴露
+        如需启用请参考 base.py 中的说明
+        """
         url = f"{self.base_url}/domains/{domain}/authCode"
 
         try:

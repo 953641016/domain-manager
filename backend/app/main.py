@@ -3,6 +3,8 @@
 """
 
 import os
+import logging
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,10 +12,80 @@ from fastapi.middleware.cors import CORSMiddleware
 # 加载环境变量
 load_dotenv()
 
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """启动/关闭时的生命周期管理"""
+    # ===== 启动时 =====
+    _start_scheduler()
+    yield
+    # ===== 关闭时 =====
+    _stop_scheduler()
+
+
+def _start_scheduler():
+    """启动 APScheduler 定时任务"""
+    try:
+        from apscheduler.schedulers.background import BackgroundScheduler
+        from apscheduler.triggers.cron import CronTrigger
+        from app.tasks.scheduler import run_scheduled_tasks
+        from app.tasks.confirmation_tasks import expire_pending_confirmations
+
+        scheduler = BackgroundScheduler(timezone="Asia/Shanghai")
+
+        # 每天 09:00 检查域名到期、发到期提醒
+        scheduler.add_job(
+            lambda: _run_with_db(run_scheduled_tasks),
+            CronTrigger(hour=9, minute=0),
+            id="daily_domain_check",
+            replace_existing=True,
+        )
+
+        # 每 4 小时扫描超时的待确认记录
+        scheduler.add_job(
+            lambda: _run_with_db(expire_pending_confirmations),
+            CronTrigger(hour="*/4"),
+            id="expire_confirmations",
+            replace_existing=True,
+        )
+
+        scheduler.start()
+        app.state.scheduler = scheduler
+        logger.info("定时任务调度器已启动")
+    except Exception as e:
+        logger.error("定时任务调度器启动失败: %s", e)
+
+
+def _stop_scheduler():
+    """关闭调度器"""
+    try:
+        sched = getattr(app.state, "scheduler", None)
+        if sched and sched.running:
+            sched.shutdown(wait=False)
+            logger.info("定时任务调度器已关闭")
+    except Exception:
+        pass
+
+
+def _run_with_db(func):
+    """为定时任务提供数据库会话"""
+    from app.core.database import SessionLocal
+    db = SessionLocal()
+    try:
+        func(db)
+    except Exception as e:
+        logger.error("定时任务执行失败: %s", e)
+    finally:
+        db.close()
+
+
 app = FastAPI(
     title="域名管家 API",
     description="企业级域名管理系统",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # 从环境变量获取允许的 CORS origins

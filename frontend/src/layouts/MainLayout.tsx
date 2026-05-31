@@ -37,37 +37,42 @@ type MenuEntry = MenuLeaf | MenuGroup;
 const isGroup = (entry: MenuEntry): entry is MenuGroup =>
   (entry as MenuGroup).children !== undefined;
 
-const DOMAIN_ROLES = ['domain_spec', 'admin', 'super_admin'];
-const ADMIN_ROLES = ['admin', 'super_admin'];
+// 角色常量（对应 permission.py 设计）
+const SPEC_ROLES  = ['domain_spec', 'super_admin'];         // 域名专员 + 超管
+const ADMIN_ROLES = ['admin', 'super_admin'];               // 系统管理员 + 超管
+const ALL_WEB     = ['domain_spec', 'admin', 'super_admin'];// 所有 Web 角色
 
 const MENU: MenuEntry[] = [
-  // 概览
+  // 概览——所有 Web 用户可见
   { key: 'dashboard', label: '仪表盘', path: AppRoutes.DASHBOARD, icon: '📊' },
-  // 申请审批
+  // 申请记录——所有 Web 用户可见（各自过滤数据由后端保证）
   { key: 'requests', label: '申请记录', path: AppRoutes.REQUESTS, icon: '📋' },
-  // 域名资产
+  // 域名资产——仅 domain_spec / super_admin（admin 不参与业务）
   {
     key: 'domains',
     label: '域名资产',
     icon: '🌐',
-    roles: DOMAIN_ROLES,
+    roles: SPEC_ROLES,
     children: [
       { key: 'domains-list', label: '域名列表', path: AppRoutes.DOMAINS, icon: '🌐' },
       { key: 'expiration', label: '到期管理', path: AppRoutes.EXPIRATION, icon: '⏰' },
     ],
   },
-  // 系统管理
+  // 系统管理——子项各自控权，组本身对所有 Web 可见
   {
     key: 'system',
     label: '系统管理',
     icon: '⚙️',
-    roles: ADMIN_ROLES,
+    roles: ALL_WEB,
     children: [
-      { key: 'users', label: '用户管理', path: AppRoutes.SYSTEM_USERS, icon: '👥' },
-      { key: 'accounts', label: '域名账号管理', path: AppRoutes.SYSTEM_ACCOUNTS, icon: '🔑' },
-      { key: 'providers', label: '服务商与默认', path: AppRoutes.SYSTEM_PROVIDERS, icon: '🏷️' },
-      { key: 'statistics', label: '统计报表', path: AppRoutes.STATISTICS, icon: '📈' },
-      { key: 'logs', label: '操作日志', path: AppRoutes.LOGS, icon: '📝' },
+      // 用户管理：admin + super_admin（domain_spec 不管人）
+      { key: 'users',      label: '用户管理',   path: AppRoutes.SYSTEM_USERS,     icon: '👥', roles: ADMIN_ROLES },
+      // 账号/服务商：domain_spec + super_admin（admin 不碰账号）
+      { key: 'accounts',   label: '域名账号管理', path: AppRoutes.SYSTEM_ACCOUNTS,  icon: '🔑', roles: SPEC_ROLES },
+      { key: 'providers',  label: '服务商与默认', path: AppRoutes.SYSTEM_PROVIDERS, icon: '🏷️', roles: SPEC_ROLES },
+      // 统计/日志/SSL：所有 Web 角色可见
+      { key: 'statistics', label: '统计报表',   path: AppRoutes.STATISTICS,       icon: '📈', roles: ALL_WEB },
+      { key: 'logs',       label: '操作日志',   path: AppRoutes.LOGS,             icon: '📝', roles: ALL_WEB },
       { key: 'ssl', label: 'SSL 证书', path: AppRoutes.SSL, icon: '🔒' },
     ],
   },

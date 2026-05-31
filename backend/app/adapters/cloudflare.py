@@ -186,7 +186,12 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
             }
 
     def transfer_domain(self, domain: str, auth_code: str) -> Dict[str, Any]:
-        """转入域名"""
+        """
+        转入域名
+
+        ⚠️ 已禁用：功能代码保留但API层未暴露
+        如需启用请参考 base.py 中的说明
+        """
         url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains/transfer"
 
         payload = {

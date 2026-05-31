@@ -361,6 +361,12 @@ class UserOperationConfirmationService:
 
         op = confirmation.operation_type
         details = confirmation.operation_details or {}
+
+        # 用户增改删：以 details["action"] 为准（operation_type 仅用于卡片归类）
+        if details.get("action") in ("create_user", "update_user", "delete_user", "activate_user"):
+            self._execute_user_op(details)
+            return
+
         domain_svc = DomainService(self.db)
 
         # 账号操作：写库时 domain_service 会自动加密 API Key
@@ -415,6 +421,28 @@ class UserOperationConfirmationService:
             if obj:
                 self.db.delete(obj)
                 self.db.commit()
+
+    def _execute_user_op(self, details: dict) -> None:
+        """执行用户增改删（审批通过后）"""
+        from app.services.user_service import UserService
+        from app.schemas.user import UserCreate, UserUpdate
+
+        user_svc = UserService(self.db)
+        action = details.get("action")
+
+        if action == "create_user":
+            data = UserCreate(**details["user_data"])
+            user_svc.create_user(data)
+
+        elif action == "update_user":
+            data = UserUpdate(**details.get("changes", {}))
+            user_svc.update_user(details["user_id"], data)
+
+        elif action == "delete_user":
+            user_svc.delete_user(details["user_id"])
+
+        elif action == "activate_user":
+            user_svc.activate_user(details["user_id"])
 
     def _notify_initiator(
         self,
@@ -553,6 +581,48 @@ class UserOperationConfirmationService:
             import logging
             logging.getLogger(__name__).warning("发送授权卡片给超管失败")
 
+    @staticmethod
+    def _role_name(role: Optional[str]) -> str:
+        if not role:
+            return "未指定"
+        return ROLE_PERMISSIONS.get(role, {}).get("name", role)
+
+    def _format_user_op(self, prefix: str, action: str, details: dict) -> str:
+        """渲染用户增改删的描述文本"""
+        if action == "create_user":
+            ud = details.get("user_data", {})
+            return (
+                f"{prefix}新增用户：{ud.get('name')}"
+                f"（角色：{self._role_name(ud.get('role'))}，飞书：{ud.get('feishu_user_id') or '未填'}）"
+            )
+
+        if action == "update_user":
+            changes = details.get("changes", {}) or {}
+            parts = []
+            if "name" in changes:
+                parts.append(f"姓名→{changes['name']}")
+            if "role" in changes:
+                parts.append(f"角色→{self._role_name(changes['role'])}")
+            if "department" in changes:
+                parts.append(f"部门→{changes['department']}")
+            if "assigned_specialist_id" in changes:
+                parts.append(f"归属专员ID→{changes['assigned_specialist_id']}")
+            if "is_active" in changes:
+                parts.append(f"启用→{changes['is_active']}")
+            summary = "；".join(parts) if parts else "（无可显示字段）"
+            return f"{prefix}更新用户：{details.get('target_name')} - {summary}"
+
+        if action == "delete_user":
+            return (
+                f"{prefix}删除/禁用用户：{details.get('target_name')}"
+                f"（{self._role_name(details.get('target_role'))}）"
+            )
+
+        if action == "activate_user":
+            return f"{prefix}激活用户：{details.get('target_name')}"
+
+        return f"{prefix}用户操作：{action}"
+
     def format_operation_description(self, confirmation: UserOperationConfirmation) -> str:
         """格式化操作描述文本（用于显示）"""
         op_type = confirmation.operation_type
@@ -562,6 +632,11 @@ class UserOperationConfirmationService:
         prefix = ""
         if confirmation.requires_super_admin:
             prefix = "【需超级管理员确认】"
+
+        # 用户增改删：统一以 details["action"] 渲染（目标信息存于 operation_details）
+        action = (details or {}).get("action")
+        if action in ("create_user", "update_user", "delete_user", "activate_user"):
+            return self._format_user_op(prefix, action, details)
 
         if op_type == ConfirmationOperationType.ADD_DOMAIN_SPEC:
             return f"{prefix}添加域名专员：{target_data.get('name')} ({target_data.get('feishu_userid')})"

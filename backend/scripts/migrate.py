@@ -19,6 +19,7 @@ from app.models.request import Request
 from app.models.dns import DnsRecord
 from app.models.audit import AuditLog
 from app.models.user_confirmation import UserOperationConfirmation
+from app.models.feishu_bitable import FeishuBitableConfig
 
 # ===== 需要补的列（表名 → [(列名, DDL类型, 默认值)] ） =====
 COLUMNS_TO_ADD = {

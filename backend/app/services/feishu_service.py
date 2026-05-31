@@ -305,7 +305,98 @@ class FeishuService:
             ]
         }
         return self.send_card_message(receive_id, card_content, receive_id_type)
-    
+
+    # ──────────────────────────────────────────────
+    # 多维表格（Bitable）
+    # ──────────────────────────────────────────────
+
+    def read_bitable_records(self, app_token: str, table_id: str) -> List[Dict[str, Any]]:
+        """读取多维表格所有记录，返回非空数据行列表。"""
+        url = f"{self.base_url}/open-apis/bitable/v1/apps/{app_token}/tables/{table_id}/records"
+        headers = {"Authorization": f"Bearer {self.get_app_access_token()}"}
+        rows = []
+        page_token = None
+        while True:
+            params = {"page_size": 100}
+            if page_token:
+                params["page_token"] = page_token
+            resp = requests.get(url, headers=headers, params=params).json()
+            items = resp.get("data", {}).get("items") or []
+            rows.extend(items)
+            page_token = resp.get("data", {}).get("page_token")
+            if not page_token:
+                break
+        return rows
+
+    def send_dns_approval_card(
+        self,
+        receive_id: str,
+        request_id: str,
+        requester_name: str,
+        domain: str,
+        dns_provider: str,
+        records: List[Dict[str, Any]],
+        receive_id_type: str = "open_id",
+    ) -> Dict[str, Any]:
+        """向专员发送 DNS 解析批量审批卡片。"""
+        record_lines = "\n".join(
+            f"• **{r.get('hostname', r.get('Hostname', ''))}**  "
+            f"{r.get('type', r.get('Type', ''))}  →  "
+            f"{r.get('target', r.get('Target', ''))}"
+            for r in records
+        )
+        provider_label = {
+            "cloudflare": "Cloudflare",
+            "vercel": "Vercel",
+            "clerk": "Clerk",
+        }.get(dns_provider.lower(), dns_provider)
+
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": "🌐 DNS 解析申请"},
+                "template": "blue",
+            },
+            "elements": [
+                {
+                    "tag": "div",
+                    "text": {
+                        "tag": "lark_md",
+                        "content": (
+                            f"**申请人**：{requester_name}\n"
+                            f"**域名**：{domain}\n"
+                            f"**解析平台**：{provider_label}\n"
+                            f"**记录数**：{len(records)} 条"
+                        ),
+                    },
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "div",
+                    "text": {"tag": "lark_md", "content": record_lines},
+                },
+                {"tag": "hr"},
+                {
+                    "tag": "action",
+                    "actions": [
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "✅ 批准执行"},
+                            "type": "primary",
+                            "value": {"action": "approve_dns_request", "request_id": request_id},
+                        },
+                        {
+                            "tag": "button",
+                            "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                            "type": "danger",
+                            "value": {"action": "reject_dns_request", "request_id": request_id},
+                        },
+                    ],
+                },
+            ],
+        }
+        return self.send_card_message(receive_id, card, receive_id_type)
+
     def verify_webhook_signature(self, request_body: Dict[str, Any]) -> bool:
         """
         验证webhook请求签名

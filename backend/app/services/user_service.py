@@ -21,10 +21,22 @@ class UserService:
         return self.db.query(User).filter(User.id == user_id).first()
 
     def get_user_by_feishu_userid(self, feishu_userid: str) -> Optional[User]:
-        """
-        根据飞书用户ID获取用户
-        """
+        """根据飞书 user_id 获取用户"""
         return self.db.query(User).filter(User.feishu_user_id == feishu_userid).first()
+
+    def get_user_by_feishu_open_id(self, open_id: str) -> Optional[User]:
+        """根据飞书 open_id 获取用户"""
+        return self.db.query(User).filter(User.feishu_open_id == open_id).first()
+
+    def get_user_by_any_feishu_id(self, feishu_id: str) -> Optional[User]:
+        """用 open_id 或 user_id 任一匹配即可（卡片回调场景）"""
+        return (
+            self.db.query(User)
+            .filter(
+                (User.feishu_open_id == feishu_id) | (User.feishu_user_id == feishu_id)
+            )
+            .first()
+        )
 
     def get_users(
         self,

@@ -115,6 +115,12 @@ class BaseRegistrarAdapter(ABC):
         """
         转入域名
 
+        ⚠️ 已禁用：域名转入功能暂不开放
+        如需启用，需：
+        1. 在 permission.py 中添加 can_transfer 权限
+        2. 在 API 层暴露 transfer 接口
+        3. 添加审批流程控制
+
         Args:
             domain: 域名名称
             auth_code: 转移授权码
@@ -131,6 +137,10 @@ class BaseRegistrarAdapter(ABC):
     def get_transfer_code(self, domain: str) -> Dict[str, Any]:
         """
         获取域名转移授权码
+
+        ⚠️ 已禁用：域名转出功能暂不开放
+        该功能用于将域名从当前注册商转出，涉及域名安全风险
+        如需启用，需额外安全评估和审批流程
 
         Args:
             domain: 域名名称

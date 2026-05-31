@@ -94,38 +94,66 @@ class ExecutionService:
         if not records:
             return {"success": False, "error": "申请数据中未找到有效的解析记录", "records": []}
 
+        # 一次性拉取该域名现有记录，用于幂等判断
+        try:
+            existing_records = adapter.get_records(request.domain_name)
+        except Exception:
+            existing_records = []
+
+        def _find_existing(host: str, rtype: str):
+            for er in existing_records:
+                er_host = str(er.get("host") or er.get("name") or er.get("hostname") or "").lower().rstrip(".")
+                er_type = str(er.get("type") or er.get("record_type") or "").upper()
+                if er_host == host.lower() and er_type == rtype.upper():
+                    return er
+            return None
+
         results: List[Dict[str, Any]] = []
         for rec in records:
-            op = str(rec.get("operation_type") or rec.get("operation") or "add").lower()
-            rtype = rec.get("record_type") or rec.get("type")
-            host = rec.get("host") or rec.get("name") or "@"
-            value = rec.get("value") or rec.get("content")
-            ttl = self._to_int(rec.get("ttl"), 300)
+            rtype = str(rec.get("record_type") or rec.get("type") or "").upper()
+            host  = str(rec.get("host") or rec.get("name") or rec.get("hostname") or "@")
+            value = str(rec.get("value") or rec.get("content") or rec.get("target") or "")
+            ttl      = self._to_int(rec.get("ttl"), 300)
             priority = self._to_int(rec.get("priority"), None)
-            record_id = rec.get("record_id") or rec.get("id")
 
-            label = {"domain": request.domain_name, "type": rtype, "host": host, "value": value, "operation": op}
+            label = {"domain": request.domain_name, "type": rtype, "host": host, "value": value}
 
-            if not rtype or value is None:
+            if not rtype or not value:
                 results.append({"record": label, "status": "failed", "message": "记录类型或记录值缺失"})
                 continue
 
-            try:
-                if op in ("update", "modify", "edit") and record_id:
-                    r = adapter.update_record(request.domain_name, str(record_id), rtype, host, value, ttl, priority)
-                else:
+            existing = _find_existing(host, rtype)
+
+            if existing:
+                ex_value = str(existing.get("value") or existing.get("content") or existing.get("target") or "")
+                if ex_value == value:
+                    results.append({"record": label, "status": "skipped", "message": "记录已存在且值一致，跳过"})
+                    continue
+                # 值不同 → 修改
+                record_id = str(existing.get("record_id") or existing.get("id") or "")
+                try:
+                    r = adapter.update_record(request.domain_name, record_id, rtype, host, value, ttl, priority)
+                except Exception as e:
+                    r = {"success": False, "message": f"修改记录异常: {str(e)}"}
+                results.append({
+                    "record": label, "operation": "update",
+                    "status": "success" if r.get("success") else "failed",
+                    "message": r.get("message", ""),
+                })
+            else:
+                # 不存在 → 新增
+                try:
                     r = adapter.create_record(request.domain_name, rtype, host, value, ttl, priority)
-            except Exception as e:
-                r = {"success": False, "message": f"调用解析API异常: {str(e)}"}
+                except Exception as e:
+                    r = {"success": False, "message": f"新增记录异常: {str(e)}"}
+                results.append({
+                    "record": label, "operation": "create",
+                    "status": "success" if r.get("success") else "failed",
+                    "message": r.get("message", ""),
+                    "record_id": r.get("record_id"),
+                })
 
-            results.append({
-                "record": label,
-                "status": "success" if r.get("success") else "failed",
-                "message": r.get("message", ""),
-                "record_id": r.get("record_id"),
-            })
-
-        ok = sum(1 for x in results if x["status"] == "success")
+        ok = sum(1 for x in results if x["status"] in ("success", "skipped"))
         total = len(results)
         return {
             "success": ok == total and total > 0,

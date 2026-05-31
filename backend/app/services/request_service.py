@@ -193,6 +193,14 @@ class RequestService:
             Request.status == "pending"
         ).order_by(Request.created_at.asc()).all()
 
+    def get_pending_domain_request(self, domain_name: str) -> Optional[Request]:
+        """查询某域名是否已有待审批的注册申请（幂等检查）"""
+        return self.db.query(Request).filter(
+            Request.type == "domain_register",
+            Request.domain_name == domain_name,
+            Request.status == "pending",
+        ).first()
+
     def get_my_requests(self, requester_id: int, skip: int = 0, limit: int = 100) -> List[Request]:
         """获取我的申请"""
         return self.db.query(Request).filter(

@@ -132,7 +132,9 @@ async def auth_callback(
     <script>
         localStorage.setItem('access_token', '{access_token}');
         localStorage.setItem('user', '{user_json_escaped}');
-        window.location.href = '/dm/dashboard';
+        var redirect = localStorage.getItem('post_login_redirect') || '/dm/dashboard';
+        localStorage.removeItem('post_login_redirect');
+        window.location.href = redirect.startsWith('/') ? redirect : '/dm/dashboard';
     </script>
 </head>
 <body>

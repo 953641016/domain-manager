@@ -332,6 +332,9 @@ flowchart TD
 
 ## 5. 飞书文档集成方案
 
+> ⚠️ **本节为原始需求草稿，已有更新版设计文档。**  
+> 请以 [docs/feishu-doc-integration.md](feishu-doc-integration.md) 为准。
+
 ### 5.1 飞书多维表格配置
 
 #### 5.1.1 域名信息表格

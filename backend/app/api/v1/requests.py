@@ -169,6 +169,14 @@ def create_request(
             detail=f"无效的申请类型: {data.type}"
         )
 
+    # ADR-3：业务人员必须归属专员，否则无权申请
+    if current_user.role == "business":
+        if not getattr(current_user, "assigned_specialist_id", None):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="您尚未分配归属专员，无法提交申请。请联系系统管理员配置。"
+            )
+
     try:
         request = service.create_request(
             data=data,

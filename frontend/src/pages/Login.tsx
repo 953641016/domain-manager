@@ -3,7 +3,7 @@
  * 使用飞书OAuth扫码登录
  */
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/client';
 
 interface UserInfo {
@@ -17,21 +17,30 @@ interface UserInfo {
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [oauthUrl, setOauthUrl] = useState('');
 
   useEffect(() => {
+    // 保存登录后的跳转目标（供 callback 页面读取）
+    const redirect = searchParams.get('redirect');
+    if (redirect) {
+      localStorage.setItem('post_login_redirect', redirect);
+    }
+
     // 检查是否已登录
     const token = localStorage.getItem('access_token');
     if (token) {
-      navigate('/dashboard');
+      const dest = localStorage.getItem('post_login_redirect') || '/dashboard';
+      localStorage.removeItem('post_login_redirect');
+      navigate(dest, { replace: true });
       return;
     }
 
     // 获取OAuth URL
     fetchOAuthUrl();
-  }, [navigate]);
+  }, [navigate, searchParams]);
 
   const fetchOAuthUrl = async () => {
     try {
