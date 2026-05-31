@@ -6,7 +6,7 @@
  */
 
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosError } from 'axios';
-import { API_BASE_PATH } from '@/config/routes';
+import { API_BASE_PATH, APP_BASE_PATH } from '@/config/routes';
 
 // 创建 Axios 实例
 const apiClient: AxiosInstance = axios.create({
@@ -64,14 +64,16 @@ apiClient.interceptors.response.use(
 
       switch (status) {
         case 401:
-          // 未授权，清除 token 并跳转登录
+          // 未授权，清除 token 并跳转登录（使用 basename 保证子目录部署正确）
           localStorage.removeItem('access_token');
-          window.location.href = '/login';
+          window.location.href = `${APP_BASE_PATH}/login`;
           break;
 
         case 403:
-          // 无权限，跳转到 403 页面
-          window.location.href = '/403';
+          // 无权限：交由调用方处理（如展示错误提示）。
+          // 不在此处强制跳转——页面级权限由 PermissionRoute 守卫，
+          // 而操作级 403（如"超管不能被禁用"）只需提示，不应离开当前页。
+          console.error('无权限操作:', error.response.data);
           break;
 
         case 404:

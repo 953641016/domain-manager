@@ -543,24 +543,64 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(super_admin, "feishu_open_id", None) else "user_id"
 
-        # 用统一的描述方法生成操作摘要（已处理账号类、用户类、服务商类所有情况）
-        desc = self.format_operation_description(confirmation)
         details = confirmation.operation_details or {}
+        action = details.get("action", "")
+        op_type = confirmation.operation_type
 
-        # 去掉卡片里重复的"【需超级管理员确认】"前缀（卡片本身就是发给超管的）
-        desc_clean = desc.replace("【需超级管理员确认】", "").strip()
+        # 操作事项（动词短语）
+        事项_map = {
+            "create_user":     "创建用户",
+            "update_user":     "修改用户",
+            "deactivate_user": "禁用用户",
+            "delete_user":     "删除用户",
+            "activate_user":   "激活用户",
+            "add_reg_account":    "新增注册账号",
+            "update_reg_account": "修改注册账号",
+            "delete_reg_account": "删除注册账号",
+            "add_dns_account":    "新增解析账号",
+            "update_dns_account": "修改解析账号",
+            "delete_dns_account": "删除解析账号",
+            "set_default_config": "修改默认配置",
+            "add_provider":    "新增服务商",
+            "update_provider": "修改服务商",
+            "delete_provider": "删除服务商",
+        }
+        op_event = 事项_map.get(action) or 事项_map.get(op_type, op_type)
+
+        # 操作对象（目标 + 补充说明）
+        if action == "create_user":
+            ud = details.get("user_data", {})
+            op_target = f"{ud.get('name', '')}（{self._role_name(ud.get('role', ''))}）"
+        elif action in ("deactivate_user", "delete_user", "activate_user", "update_user"):
+            name = details.get("target_name", "")
+            role = self._role_name(details.get("target_role", ""))
+            suffix = {
+                "deactivate_user": "，禁用后可恢复",
+                "delete_user":     "，⚠️ 硬删除不可恢复",
+                "activate_user":   "",
+                "update_user":     "",
+            }.get(action, "")
+            changes = details.get("changes", {})
+            change_str = "；".join(
+                f"{k}→{v}" for k, v in changes.items()
+            ) if changes and action == "update_user" else ""
+            op_target = f"{name}（{role}{suffix}）" + (f"\n变更：{change_str}" if change_str else "")
+        else:
+            acc_name = details.get("data", {}).get("name") or details.get("account_name", "")
+            op_target = acc_name or "—"
+
         lines = [
-            f"**操作人：** {confirmation.initiator_name}",
-            f"**操作内容：**\n{desc_clean}",
+            f"申请人：{confirmation.initiator_name}",
+            f"操作事项：{op_event}",
+            f"操作对象：{op_target}",
         ]
         if api_key_masked:
-            lines.append(f"**API Key：** {api_key_masked}")
+            lines.append(f"API Key：{api_key_masked}")
 
-        # 根据操作类型选择标题
-        action = details.get("action", "")
+        # 卡片标题
         if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
             card_title = "👤 用户管理授权申请"
-        elif confirmation.operation_type in ("add_provider", "update_provider", "delete_provider"):
+        elif op_type in ("add_provider", "update_provider", "delete_provider"):
             card_title = "🏷️ 服务商配置授权申请"
         else:
             card_title = "🔐 账号配置授权申请"
