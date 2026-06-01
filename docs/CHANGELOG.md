@@ -8,7 +8,16 @@
 
 ## [未发布]
 
-（下次发版前的变更在此追加）
+### 新增
+- **飞书文档按钮申请流**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：新增 `POST /api/v1/feishu/doc-button/submit`，支持飞书多维表格/文档按钮仅传 `action + doc_url + doc_format + applicant_feishu_id`，后端读取 docx 内容并按 `domain_purchase`、`clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`、`all_dns_except_gsc` 归一生成申请。
+- **新版审批卡片**：购买域名卡片展示域名、申请人、注册账号下拉、注册年限、预估价格、来源文档、拒绝理由；DNS 卡片展示记录预览、DNS 账号下拉、审核备注、拒绝理由。审批通过后自动执行，拒绝后通知申请人。
+- **文档解析配置**（`backend/app/config.py`）：新增 `FEISHU_DOC_APP_ID`、`FEISHU_DOC_APP_SECRET`、`BACKEND_DNS_DEFAULT_TARGET`，用于文档读取应用和后端接口域名默认解析目标。
+
+### 安全/权限
+- **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
+
+### 修复
+- **DNS 执行保护**（`backend/app/services/execution_service.py`）：对暂不支持的 DNS 记录类型提前标记失败，避免将 `REDIRECT_301` 等非标准 DNS 类型直接发送到解析服务商 API。
 
 ---
 

@@ -109,6 +109,7 @@ class ExecutionService:
             return None
 
         results: List[Dict[str, Any]] = []
+        supported_types = {"A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV"}
         for rec in records:
             rtype = str(rec.get("record_type") or rec.get("type") or "").upper()
             host  = str(rec.get("host") or rec.get("name") or rec.get("hostname") or "@")
@@ -120,6 +121,9 @@ class ExecutionService:
 
             if not rtype or not value:
                 results.append({"record": label, "status": "failed", "message": "记录类型或记录值缺失"})
+                continue
+            if rtype not in supported_types:
+                results.append({"record": label, "status": "failed", "message": f"暂不支持的 DNS 记录类型: {rtype}"})
                 continue
 
             existing = _find_existing(host, rtype)

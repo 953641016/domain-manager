@@ -31,6 +31,16 @@ SECTIONS_NO_BITABLE = {
     "domain_register":  {"label": "域名注册",            "request_type": "domain_register"},
 }
 
+DOC_BUTTON_ACTIONS = {
+    "domain_purchase": {"label": "购买域名", "request_type": "domain_register"},
+    "clerk_dns": {"label": "Clerk 域名解析", "request_type": "dns_record"},
+    "backend_dns": {"label": "后端接口服务域名解析", "request_type": "dns_record"},
+    "vercel_dns": {"label": "Vercel 域名解析", "request_type": "dns_record"},
+    "cf_dns": {"label": "CF 域名解析", "request_type": "dns_record"},
+    "gsc_dns": {"label": "GSC 网站认证解析", "request_type": "dns_record"},
+    "all_dns_except_gsc": {"label": "一键解析 Clerk + 后端 + Vercel + CF", "request_type": "dns_record"},
+}
+
 
 class FeishuUserInfo(BaseModel):
     """飞书用户信息响应模型"""
@@ -249,6 +259,282 @@ async def send_card(request: SendCardRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"发送卡片失败: {str(e)}")
+
+
+# ════════════════════════════════════════════════════════════
+# 飞书文档按钮申请
+# 权限：调用方需传入 applicant_feishu_id，后端校验申请人存在、启用且已归属域名专员。
+# 超管确认：该业务申请先进入域名专员审批卡片；审批通过后才执行注册或解析。
+# 返回格式：对象 {success, request_id, action, domain, records_count}。
+# ════════════════════════════════════════════════════════════
+
+
+class DocButtonSubmitBody(BaseModel):
+    action: str
+    doc_url: str
+    doc_format: str = "standard_v1"
+    applicant_feishu_id: str
+    source: str = "feishu_doc_button"
+    verification_token: Optional[str] = None
+
+
+@router.post("/doc-button/submit")
+def submit_doc_button_request(body: DocButtonSubmitBody, db: Session = Depends(get_db)):
+    """飞书文档/多维表格按钮触发：读取文档内容，创建待审批申请，发送审批卡片。"""
+    from app.services.user_service import UserService
+    from app.services.request_service import RequestService
+    from app.services.feishu_doc_parser import FeishuDocParser
+    from app.schemas.request import RequestCreate
+
+    if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
+        if body.verification_token != Config.FEISHU_VERIFICATION_TOKEN:
+            raise HTTPException(status_code=403, detail="verification_token 不正确")
+
+    action_meta = DOC_BUTTON_ACTIONS.get(body.action)
+    if not action_meta:
+        raise HTTPException(status_code=400, detail=f"未知 action: {body.action}")
+
+    user_svc = UserService(db)
+    applicant = user_svc.get_user_by_any_feishu_id(body.applicant_feishu_id)
+    if not applicant or not applicant.is_active:
+        raise HTTPException(status_code=403, detail="申请人不存在或已禁用")
+    if not getattr(applicant, "assigned_specialist_id", None):
+        raise HTTPException(status_code=403, detail="申请人尚未分配归属专员，无法提交申请")
+
+    specialist = user_svc.get_user(applicant.assigned_specialist_id)
+    if not specialist or specialist.role not in ("domain_spec", "super_admin"):
+        raise HTTPException(status_code=400, detail="未找到可审批的归属域名专员")
+
+    try:
+        parsed = FeishuDocParser().parse(body.doc_url, body.action, body.doc_format)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    request_data = {
+        "action": body.action,
+        "action_label": action_meta["label"],
+        "doc_url": body.doc_url,
+        "doc_token": parsed.doc_token,
+        "doc_title": parsed.title,
+        "doc_format": body.doc_format,
+        "records": parsed.records,
+    }
+    if parsed.request_type == "domain_register":
+        request_data["domain"] = parsed.domain
+    else:
+        request_data["dns_provider"] = body.action
+        request_data["domain"] = parsed.domain
+
+    if parsed.request_type == "domain_register":
+        accounts = _get_reviewable_reg_accounts(db, specialist)
+        if not accounts:
+            raise HTTPException(status_code=400, detail="归属域名专员没有可用注册账号")
+    else:
+        accounts = _get_reviewable_dns_accounts(db, specialist)
+        if not accounts:
+            raise HTTPException(status_code=400, detail="归属域名专员没有可用 DNS 账号")
+
+    req_svc = RequestService(db)
+    if parsed.request_type == "domain_register":
+        existing = req_svc.get_pending_domain_request(parsed.domain)
+        if existing:
+            raise HTTPException(status_code=409, detail=f"域名 {parsed.domain} 已有待审批申请（ID: {existing.id}）")
+
+    req = req_svc.create_request(
+        data=RequestCreate(
+            type=parsed.request_type,
+            domain_name=parsed.domain,
+            request_data=request_data,
+            source=body.source,
+        ),
+        requester_id=applicant.id,
+        requester_name=applicant.name,
+    )
+
+    if parsed.request_type == "domain_register":
+        card = _build_domain_purchase_approval_card(req, applicant, specialist, accounts)
+    else:
+        card = _build_dns_doc_approval_card(req, applicant, specialist, accounts)
+
+    receive_id = getattr(specialist, "feishu_open_id", None) or getattr(specialist, "feishu_user_id", None)
+    receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
+    if not receive_id:
+        raise HTTPException(status_code=400, detail="归属域名专员未配置飞书 ID，无法发送审批卡片")
+    result = feishu_service.send_card_message(receive_id, card, receive_type)
+    if result.get("code") != 0:
+        raise HTTPException(status_code=502, detail=f"发送审批卡片失败: {result}")
+
+    return {
+        "success": True,
+        "request_id": req.id,
+        "action": body.action,
+        "domain": parsed.domain,
+        "records_count": len(parsed.records),
+    }
+
+
+def _get_reviewable_reg_accounts(db: Session, reviewer) -> List[Any]:
+    from app.models.domain import RegAccount
+    query = db.query(RegAccount).filter(RegAccount.is_active == True)  # noqa: E712
+    if reviewer.role != "super_admin":
+        query = query.filter(RegAccount.owner_id == reviewer.id)
+    return query.order_by(RegAccount.name.asc()).all()
+
+
+def _get_reviewable_dns_accounts(db: Session, reviewer) -> List[Any]:
+    from app.models.domain import DnsAccount
+    query = db.query(DnsAccount).filter(DnsAccount.is_active == True)  # noqa: E712
+    if reviewer.role != "super_admin":
+        query = query.filter(DnsAccount.owner_id == reviewer.id)
+    return query.order_by(DnsAccount.name.asc()).all()
+
+
+def _select_options(accounts: List[Any], code_attr: str) -> List[Dict[str, Any]]:
+    return [
+        {
+            "text": {"tag": "plain_text", "content": f"{account.name}（{getattr(account, code_attr)}）"},
+            "value": str(account.id),
+        }
+        for account in accounts
+    ]
+
+
+def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: List[Any]) -> Dict[str, Any]:
+    data = req.request_data or {}
+    account_options = _select_options(accounts, "registrar_code")
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "🛒 域名购买申请"},
+            "template": "orange",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**域名**：{req.domain_name}\n"
+                        f"**申请人**：{applicant.name}\n"
+                        f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
+                        "**预估价格**：以注册商返回为准"
+                    ),
+                },
+            },
+            {
+                "tag": "select_static",
+                "placeholder": {"tag": "plain_text", "content": "选择注册厂商账号"},
+                "initial_option": account_options[0],
+                "options": account_options,
+                "name": "selected_reg_account_id",
+            },
+            {
+                "tag": "select_static",
+                "placeholder": {"tag": "plain_text", "content": "选择注册年限"},
+                "initial_option": {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
+                "options": [
+                    {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
+                    {"text": {"tag": "plain_text", "content": "2 年"}, "value": "2"},
+                    {"text": {"tag": "plain_text", "content": "3 年"}, "value": "3"},
+                ],
+                "name": "register_years",
+            },
+            {
+                "tag": "input",
+                "name": "reject_reason",
+                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 批准并执行"},
+                        "type": "primary",
+                        "value": {"action": "approve_doc_request", "request_id": req.id},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                        "type": "danger",
+                        "value": {"action": "reject_doc_request", "request_id": req.id},
+                    },
+                ],
+            },
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": f"审批人：{reviewer.name}；申请编号：#{req.id[:8]}"}]},
+        ],
+    }
+
+
+def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) -> Dict[str, Any]:
+    data = req.request_data or {}
+    records = data.get("records") or []
+    preview = "\n".join(
+        f"• `{r.get('hostname')}` {r.get('type')} → {r.get('target') or '待配置'}"
+        for r in records[:12]
+    )
+    if len(records) > 12:
+        preview += f"\n... 另有 {len(records) - 12} 条"
+    account_options = _select_options(accounts, "provider_code")
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "🌐 DNS 解析申请"},
+            "template": "blue",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**申请类型**：{data.get('action_label', req.type)}\n"
+                        f"**主域名**：{req.domain_name}\n"
+                        f"**申请人**：{applicant.name}\n"
+                        f"**记录数**：{len(records)}\n"
+                        f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})"
+                    ),
+                },
+            },
+            {"tag": "hr"},
+            {"tag": "div", "text": {"tag": "lark_md", "content": preview or "无记录"}},
+            {
+                "tag": "select_static",
+                "placeholder": {"tag": "plain_text", "content": "选择 DNS 账号"},
+                "initial_option": account_options[0],
+                "options": account_options,
+                "name": "selected_dns_account_id",
+            },
+            {
+                "tag": "input",
+                "name": "approval_comment",
+                "placeholder": {"tag": "plain_text", "content": "审核备注（可选）"},
+            },
+            {
+                "tag": "input",
+                "name": "reject_reason",
+                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+            },
+            {
+                "tag": "action",
+                "actions": [
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "✅ 批准并执行"},
+                        "type": "primary",
+                        "value": {"action": "approve_doc_request", "request_id": req.id},
+                    },
+                    {
+                        "tag": "button",
+                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                        "type": "danger",
+                        "value": {"action": "reject_doc_request", "request_id": req.id},
+                    },
+                ],
+            },
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": f"审批人：{reviewer.name}；申请编号：#{req.id[:8]}"}]},
+        ],
+    }
 
 
 # ════════════════════════════════════════════════════════════
@@ -745,6 +1031,11 @@ async def _handle_card_action(body: dict) -> dict:
         if card_action in ("approve_dns_request", "reject_dns_request"):
             return await _handle_dns_card_action(card_action, value, operator)
 
+        # 新版文档按钮申请审批（域名购买 / DNS）
+        if card_action in ("approve_doc_request", "reject_doc_request"):
+            form_values = _extract_card_form_values(body)
+            return await _handle_doc_request_card_action(card_action, value, form_values, operator)
+
         confirmation_id = value.get("confirmation_id")
         if not confirmation_id or card_action not in ("approve_account_op", "reject_account_op"):
             return {"success": True, "message": "非账号授权卡片，忽略"}
@@ -787,6 +1078,142 @@ async def _handle_card_action(body: dict) -> dict:
         import logging
         logging.getLogger(__name__).exception("处理卡片回调失败")
         return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}
+
+
+def _extract_card_form_values(body: dict) -> Dict[str, Any]:
+    """兼容不同飞书卡片版本的表单回传结构。"""
+    action = body.get("action", {}) or body.get("event", {}).get("action", {})
+    candidates = [
+        action.get("form_value"),
+        action.get("form_values"),
+        action.get("input_values"),
+        action.get("value", {}).get("form_value") if isinstance(action.get("value"), dict) else None,
+    ]
+    result: Dict[str, Any] = {}
+    for item in candidates:
+        if isinstance(item, dict):
+            result.update(item)
+    return result
+
+
+def _as_int(value: Any) -> Optional[int]:
+    if isinstance(value, dict):
+        value = value.get("value")
+    if isinstance(value, list) and value:
+        value = value[0]
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _as_text(value: Any) -> str:
+    if isinstance(value, dict):
+        value = value.get("value") or value.get("text") or ""
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    return str(value or "").strip()
+
+
+async def _handle_doc_request_card_action(card_action: str, value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
+    """处理新版文档按钮申请审批卡片。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    request_id = value.get("request_id")
+    if not request_id:
+        return {"toast": {"type": "error", "content": "卡片数据异常，缺少 request_id"}}
+
+    operator_open_id = operator.get("open_id", "") or operator.get("user_id", "")
+    db = SessionLocal()
+    try:
+        from app.services.user_service import UserService
+        from app.services.request_service import RequestService
+        from app.services.execution_service import ExecutionService
+        from app.models.domain import RegAccount, DnsAccount
+
+        user_svc = UserService(db)
+        req_svc = RequestService(db)
+
+        reviewer = user_svc.get_user_by_any_feishu_id(operator_open_id)
+        if not reviewer or reviewer.role not in ("domain_spec", "super_admin"):
+            return {"toast": {"type": "error", "content": "只有域名专员可以审批此申请"}}
+
+        req = req_svc.get_request(request_id)
+        if not req or req.status != "pending":
+            return {"toast": {"type": "error", "content": "申请不存在或已处理"}}
+
+        applicant = user_svc.get_user(req.requester_id)
+        if reviewer.role != "super_admin":
+            if not applicant or applicant.assigned_specialist_id != reviewer.id:
+                return {"toast": {"type": "error", "content": "该申请不属于您负责的业务同事"}}
+
+        if card_action == "reject_doc_request":
+            reason = _as_text(form_values.get("reject_reason")) or "未填写"
+            req_svc.reject_request(request_id, reviewer.id, reviewer.name, reason=reason)
+            _notify_request_rejected(req, applicant, reviewer, reason)
+            return {"toast": {"type": "info", "content": "已拒绝该申请"}}
+
+        if req.type == "domain_register":
+            account_id = _as_int(form_values.get("selected_reg_account_id"))
+            if not account_id:
+                return {"toast": {"type": "error", "content": "请选择注册厂商账号"}}
+            account = db.query(RegAccount).filter(RegAccount.id == account_id, RegAccount.is_active == True).first()  # noqa: E712
+            if not account or (reviewer.role != "super_admin" and account.owner_id != reviewer.id):
+                return {"toast": {"type": "error", "content": "无权使用该注册账号"}}
+            req.selected_reg_account_id = account.id
+            req.selected_registrar_code = account.registrar_code
+            request_data = dict(req.request_data or {})
+            request_data["register_years"] = _as_text(form_values.get("register_years")) or "1"
+            req.request_data = request_data
+        else:
+            account_id = _as_int(form_values.get("selected_dns_account_id"))
+            if not account_id:
+                return {"toast": {"type": "error", "content": "请选择 DNS 账号"}}
+            account = db.query(DnsAccount).filter(DnsAccount.id == account_id, DnsAccount.is_active == True).first()  # noqa: E712
+            if not account or (reviewer.role != "super_admin" and account.owner_id != reviewer.id):
+                return {"toast": {"type": "error", "content": "无权使用该 DNS 账号"}}
+            req.selected_dns_account_id = account.id
+            req.selected_dns_provider_code = account.provider_code
+            comment = _as_text(form_values.get("approval_comment"))
+            if comment:
+                request_data = dict(req.request_data or {})
+                request_data["approval_comment"] = comment
+                req.request_data = request_data
+        db.commit()
+        db.refresh(req)
+
+        req_svc.approve_request(request_id, reviewer.id, reviewer.name)
+        try:
+            ExecutionService(db).execute_and_notify(req)
+        except Exception as e:
+            logger.exception("文档按钮申请执行失败: %s", e)
+        return {"toast": {"type": "success", "content": "已批准，正在执行"}}
+    except Exception as e:
+        logger.exception("处理文档按钮审批卡片失败")
+        return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}
+    finally:
+        db.close()
+
+
+def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
+    if not applicant:
+        return
+    receive_id = getattr(applicant, "feishu_open_id", None) or getattr(applicant, "feishu_user_id", None)
+    if not receive_id:
+        return
+    receive_type = "open_id" if getattr(applicant, "feishu_open_id", None) else "user_id"
+    label = "域名购买" if req.type == "domain_register" else "DNS 解析"
+    content = (
+        f"❌ {label}申请已拒绝\n"
+        f"域名：{req.domain_name}\n"
+        f"审核人：{getattr(reviewer, 'name', '未知')}\n"
+        f"拒绝理由：{reason or '未填写'}"
+    )
+    try:
+        feishu_service.send_text_message(receive_id, content, receive_type)
+    except Exception:
+        pass
 
 
 async def _handle_dns_card_action(card_action: str, value: dict, operator: dict) -> dict:

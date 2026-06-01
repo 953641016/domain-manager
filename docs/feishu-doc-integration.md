@@ -225,6 +225,58 @@ feishu_bitable_configs
 | 域名注册幂等检查 | `request_service.get_pending_domain_request()` |
 | 扫码注册走超管确认流 | `GET /feishu/add-user-callback`（已修） |
 
+---
+
+## 7.1 新版按钮申请流程（开发中）
+
+> 2026-06-01 确认：业务入口调整为飞书多维表格/文档按钮直接请求后端。按钮只传文档定位与行为参数，后端按文档格式解析域名和 DNS 数据，先创建待审批申请，审核通过后再执行购买或解析。
+
+### 按钮行为
+
+| action | 说明 | 执行类型 |
+|--------|------|----------|
+| `domain_purchase` | 购买域名申请 | 域名注册 |
+| `clerk_dns` | Clerk 域名解析 | DNS 解析 |
+| `backend_dns` | 后端接口服务域名解析 | DNS 解析 |
+| `vercel_dns` | Vercel 域名解析 | DNS 解析 |
+| `cf_dns` | CF 域名解析 | DNS 解析 |
+| `gsc_dns` | GSC 网站认证解析 | DNS 解析 |
+| `all_dns_except_gsc` | 一键解析 Clerk + 后端接口 + Vercel + CF | DNS 解析 |
+
+### 按钮请求体
+
+```json
+{
+  "action": "vercel_dns",
+  "doc_url": "https://z78zepeihr.feishu.cn/docx/xxxx",
+  "doc_format": "standard_v1",
+  "applicant_feishu_id": "ou_xxx",
+  "source": "feishu_bitable_button"
+}
+```
+
+- `doc_url` 必填：后端从 URL 中提取 docx token。
+- `action` 必填：决定解析文档中的哪一段。
+- `doc_format` 默认 `standard_v1`：兼容当前两类文档格式。
+- `applicant_feishu_id` 必填：用于匹配系统用户、归属专员与通知申请人。
+- 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供。
+
+### 审批卡片
+
+购买域名卡片展示：申请域名、申请人、注册厂商账号下拉、注册年限、预估价格、来源文档、拒绝理由。购买域名卡片不提供备注字段；拒绝理由非必填。
+
+DNS 卡片展示：申请类型、主域名、记录数量、记录预览、DNS 账号下拉、审核备注、拒绝理由。审核人只确认、选择账号、补备注；不在卡片中逐条修改 DNS 记录。若记录内容有误，申请人应修改飞书文档后重新提交。
+
+### 账号权限
+
+下拉选项必须按审核人权限过滤：
+
+- `domain_spec` 只能选择 `owner_id = 当前专员.id` 且启用的注册账号/DNS 账号。
+- `super_admin` 可选择全部启用账号。
+- `admin` 不参与购买/解析审批；即使回调被触发，后端也必须拒绝。
+
+卡片展示层和回调执行层都必须校验账号归属，不能信任前端或飞书回调传入的账号 ID。
+
 ### 待实施（飞书文档侧配置）
 
 | 功能 | 说明 |
