@@ -2,7 +2,7 @@
 飞书相关API路由
 提供OAuth授权、用户信息获取、webhook事件处理等接口
 """
-from fastapi import APIRouter, HTTPException, Query, Request, Depends
+from fastapi import APIRouter, Body, HTTPException, Query, Request, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
@@ -279,12 +279,33 @@ class DocButtonSubmitBody(BaseModel):
 
 
 @router.post("/doc-button/submit")
-def submit_doc_button_request(body: DocButtonSubmitBody, db: Session = Depends(get_db)):
+def submit_doc_button_request(
+    body: Optional[DocButtonSubmitBody] = Body(default=None),
+    action: Optional[str] = Query(default=None),
+    doc_url: Optional[str] = Query(default=None),
+    doc_format: str = Query(default="standard_v1"),
+    applicant_feishu_id: Optional[str] = Query(default=None),
+    source: str = Query(default="feishu_doc_button"),
+    verification_token: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
     """飞书文档/多维表格按钮触发：读取文档内容，创建待审批申请，发送审批卡片。"""
     from app.services.user_service import UserService
     from app.services.request_service import RequestService
     from app.services.feishu_doc_parser import FeishuDocParser
     from app.schemas.request import RequestCreate
+
+    if body is None:
+        if not action or not doc_url or not applicant_feishu_id:
+            raise HTTPException(status_code=422, detail="缺少必要参数: action、doc_url、applicant_feishu_id")
+        body = DocButtonSubmitBody(
+            action=action,
+            doc_url=doc_url,
+            doc_format=doc_format,
+            applicant_feishu_id=applicant_feishu_id,
+            source=source,
+            verification_token=verification_token,
+        )
 
     if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
         if body.verification_token != Config.FEISHU_VERIFICATION_TOKEN:
@@ -295,7 +316,7 @@ def submit_doc_button_request(body: DocButtonSubmitBody, db: Session = Depends(g
         raise HTTPException(status_code=400, detail=f"未知 action: {body.action}")
 
     user_svc = UserService(db)
-    applicant = user_svc.get_user_by_any_feishu_id(body.applicant_feishu_id)
+    applicant = user_svc.get_user_by_name_or_feishu_id(body.applicant_feishu_id)
     if not applicant or not applicant.is_active:
         raise HTTPException(status_code=403, detail="申请人不存在或已禁用")
     if not getattr(applicant, "assigned_specialist_id", None):

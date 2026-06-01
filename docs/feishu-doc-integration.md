@@ -1,4 +1,4 @@
-# 飞书文档集成方案（确认版）
+﻿# 飞书文档集成方案（确认版）
 
 > 版本：v1.1  
 > 更新日期：2026-05-31  
@@ -243,7 +243,30 @@ feishu_bitable_configs
 | `gsc_dns` | GSC 网站认证解析 | DNS 解析 |
 | `all_dns_except_gsc` | 一键解析 Clerk + 后端接口 + Vercel + CF | DNS 解析 |
 
-### 按钮请求体
+### 接口地址
+
+| 环境 | 地址 |
+|------|------|
+| 线上域名 | `https://d.fwxg.com/dm/` |
+| 飞书按钮请求地址 | `https://d.fwxg.com/dm/api/feishu/doc-button/submit` |
+| 后端内部路由 | `POST /api/v1/feishu/doc-button/submit` |
+
+> 注意：线上 Nginx 会将 `/dm/api/feishu/doc-button/submit` 转发到后端 `/api/v1/feishu/doc-button/submit`。飞书侧配置按钮或自动化 HTTP 请求时，不要额外写 `/api/v1`，否则会变成重复路径。
+
+### 请求方法
+
+```http
+POST https://d.fwxg.com/dm/api/feishu/doc-button/submit
+Content-Type: application/json
+```
+
+飞书多维表格如果只能配置 URL 参数，也可以把同名字段放在 Query 中：
+
+```http
+POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&doc_url=...&doc_format=standard_v1&applicant_feishu_id=张立坤&source=feishu_bitable_button
+```
+
+### 请求体
 
 ```json
 {
@@ -258,8 +281,116 @@ feishu_bitable_configs
 - `doc_url` 必填：后端从 URL 中提取 docx token。
 - `action` 必填：决定解析文档中的哪一段。
 - `doc_format` 默认 `standard_v1`：兼容当前两类文档格式。
-- `applicant_feishu_id` 必填：用于匹配系统用户、归属专员与通知申请人。
+- `applicant_feishu_id` 必填：可传飞书 `open_id` / `user_id`，也可传公司内唯一姓名；后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
+- `source` 可选：默认 `feishu_doc_button`，建议多维表格按钮传 `feishu_bitable_button`，方便审计来源。
 - 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供。
+
+### 请求字段说明
+
+| 字段 | 类型 | 必填 | 示例 | 说明 |
+|------|------|------|------|------|
+| `action` | string | 是 | `all_dns_except_gsc` | 本次申请动作，取值见“按钮行为”表 |
+| `doc_url` | string | 是 | `https://z78zepeihr.feishu.cn/docx/xxxx` | 飞书文档链接，后端从链接提取 docx token |
+| `doc_format` | string | 否 | `standard_v1` | 文档格式标识，当前统一传 `standard_v1` |
+| `applicant_feishu_id` | string | 是 | `张立坤` | 点击按钮的申请人；支持飞书 `open_id`、`user_id` 或公司内唯一姓名 |
+| `source` | string | 否 | `feishu_bitable_button` | 请求来源标记，用于审计和排查 |
+
+### 飞书按钮配置示例
+
+域名购买按钮：
+
+```json
+{
+  "action": "domain_purchase",
+  "doc_url": "{{文档链接}}",
+  "doc_format": "standard_v1",
+  "applicant_feishu_id": "{{当前用户姓名}}",
+  "source": "feishu_bitable_button"
+}
+```
+
+一键解析按钮（Clerk + 后端 + Vercel + CF，不含购买和 GSC）：
+
+```json
+{
+  "action": "all_dns_except_gsc",
+  "doc_url": "{{文档链接}}",
+  "doc_format": "standard_v1",
+  "applicant_feishu_id": "{{当前用户姓名}}",
+  "source": "feishu_bitable_button"
+}
+```
+
+单项解析按钮只需要替换 `action`，例如 `clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`。
+
+### 成功响应
+
+```json
+{
+  "status": "pending_approval",
+  "message": "已提交申请并发送给域名专员审批",
+  "request_id": 123,
+  "action": "vercel_dns",
+  "record_count": 2
+}
+```
+
+说明：
+
+- `status = pending_approval` 表示只完成“提交审核”，不是已经购买或解析成功。
+- `request_id` 是系统申请 ID，可用于后续排查。
+- `record_count` 是本次从文档中解析出的 DNS 记录数量；购买域名申请通常为 `0`。
+
+### 常见错误响应
+
+| HTTP 状态 | 示例 `detail` | 处理方式 |
+|-----------|---------------|----------|
+| 400 | `不支持的 action` | 检查按钮传入的 `action` 是否在支持列表内 |
+| 400 | `归属域名专员没有可用 DNS 账号` | 先在后台给该专员配置启用状态的 DNS 账号 |
+| 400 | `归属域名专员没有可用注册商账号` | 先在后台给该专员配置启用状态的注册商账号 |
+| 400 | `文档中未解析到有效记录` | 检查飞书文档内容是否符合当前两类格式 |
+| 403 | `申请人不存在或已禁用` | 检查 `applicant_feishu_id` 是否能按飞书 ID 或姓名匹配系统用户 |
+| 403 | `申请人尚未分配归属专员，无法提交申请` | 在后台给业务用户设置归属域名专员 |
+| 500 | `发送审批卡片失败` | 检查域名专员飞书 ID、机器人权限和飞书消息接口 |
+
+### curl 调试示例
+
+```bash
+curl -X POST "https://d.fwxg.com/dm/api/feishu/doc-button/submit" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "action": "vercel_dns",
+    "doc_url": "https://z78zepeihr.feishu.cn/docx/xxxx",
+    "doc_format": "standard_v1",
+    "applicant_feishu_id": "张立坤",
+    "source": "feishu_bitable_button"
+  }'
+```
+
+Query 参数调试：
+
+```bash
+curl -X POST "https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&doc_url=https%3A%2F%2Fz78zepeihr.feishu.cn%2Fdocx%2Fxxxx&doc_format=standard_v1&applicant_feishu_id=%E5%BC%A0%E7%AB%8B%E5%9D%A4&source=feishu_bitable_button"
+```
+
+### 调用链路
+
+```mermaid
+sequenceDiagram
+    participant B as 飞书按钮/自动化
+    participant A as 域名管家接口
+    participant D as 飞书文档
+    participant S as 域名专员
+    participant P as 服务商
+
+    B->>A: POST /dm/api/feishu/doc-button/submit
+    A->>A: 校验申请人和归属专员
+    A->>D: 读取 docx 内容
+    A->>A: 按 action 解析域名/DNS 数据
+    A->>S: 发送审批卡片
+    S->>A: 通过/拒绝
+    A->>P: 审批通过后执行购买或解析
+```
 
 ### 审批卡片
 
@@ -328,3 +459,4 @@ DNS 卡片展示：申请类型、主域名、记录数量、记录预览、DNS 
 ```
 
 全程无需管理员介入。
+

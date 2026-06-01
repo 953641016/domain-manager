@@ -38,6 +38,28 @@ class UserService:
             .first()
         )
 
+    def get_user_by_name(self, name: str) -> Optional[User]:
+        """根据姓名精确匹配用户（飞书多维表格按钮只能传姓名时使用）"""
+        normalized_name = (name or "").strip()
+        if not normalized_name:
+            return None
+        return (
+            self.db.query(User)
+            .filter(User.name == normalized_name)
+            .order_by(User.is_active.desc(), User.id.asc())
+            .first()
+        )
+
+    def get_user_by_name_or_feishu_id(self, identifier: str) -> Optional[User]:
+        """优先按姓名精确匹配，匹配不到时按飞书 ID 匹配。"""
+        normalized_identifier = (identifier or "").strip()
+        if not normalized_identifier:
+            return None
+        return (
+            self.get_user_by_name(normalized_identifier)
+            or self.get_user_by_any_feishu_id(normalized_identifier)
+        )
+
     def get_users(
         self,
         skip: int = 0,

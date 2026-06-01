@@ -1,4 +1,4 @@
-# CHANGELOG
+﻿# CHANGELOG
 
 本文档记录域名管家的主要功能变更和修复历史。
 
@@ -17,6 +17,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **飞书按钮参数兼容**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_service.py`）：`POST /api/v1/feishu/doc-button/submit` 兼容飞书多维表格以 Query 参数提交；`applicant_feishu_id` 支持传公司内唯一姓名，后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - **DNS 执行保护**（`backend/app/services/execution_service.py`）：对暂不支持的 DNS 记录类型提前标记失败，避免将 `REDIRECT_301` 等非标准 DNS 类型直接发送到解析服务商 API。
 
 ---
@@ -183,3 +184,4 @@
 - Cloudflare 注册商适配器
 - 定时任务（域名到期检查、状态同步）
 - React + TypeScript 前端（仪表盘、域名管理、申请管理页面）
+
