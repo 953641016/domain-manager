@@ -939,21 +939,26 @@ class UserOperationConfirmationService:
         elements.extend([
             {"tag": "hr"},
             {
-                "tag": "input",
-                "name": "reject_reason",
-                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-            },
-            {
-                "tag": "action",
-                "actions": [
+                "tag": "form",
+                "name": "account_op_approval_form",
+                "elements": [
+                    {
+                        "tag": "input",
+                        "name": "reject_reason",
+                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                    },
                     {
                         "tag": "button",
+                        "name": "approve_account_op",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "✅ 授权执行"},
                         "type": "primary",
                         "value": {"action": "approve_account_op", "confirmation_id": str(confirmation.id)},
                     },
                     {
                         "tag": "button",
+                        "name": "reject_account_op",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
                         "type": "danger",
                         "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)},

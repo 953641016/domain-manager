@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **飞书审批卡片表单渲染**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_confirmation_service.py`）：按飞书 JSON 1.0 表单容器规范，将注册服务商/DNS账号下拉、拒绝理由输入框与提交按钮放入 `form`，并修正 `select_static.initial_option` 为文本值，避免控件被过滤或卡片 JSON 解析失败。
 - **域名购买审批卡片展示优化**（`backend/app/api/v1/feishu.py`）：卡片正文不再显示“默认注册服务商/默认预估价格/服务商报价列表”，改为仅展示“注册服务商”和“预估价格”说明；注册服务商下拉项展示对应预估价，审核人切换选择时选中项同步体现价格。
 - **飞书文档按钮幂等重发**（`backend/app/api/v1/feishu.py`、`backend/app/services/request_service.py`）：域名购买已有待审批申请时不再返回 409，而是刷新报价并重新发送审批卡；已批准/已完成的同域名购买申请会直接返回已处理，避免重复购买。
 - **审核卡片申请时间**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_service.py`）：域名购买、DNS 解析、旧版确认页/多维表格审批卡片均展示申请时间；重发响应只返回飞书发送状态与消息 ID，避免响应内容过长。

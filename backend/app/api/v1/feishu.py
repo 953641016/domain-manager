@@ -574,6 +574,7 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
     account_options = _reg_account_options_with_prices(accounts, quotes)
     default_account_id = str(data.get("default_reg_account_id") or (accounts[0].id if accounts else ""))
     initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
+    initial_option_text = initial_option.get("text", {}).get("content") or ""
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -596,39 +597,46 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                 },
             },
             {
-                "tag": "select_static",
-                "placeholder": {"tag": "plain_text", "content": "选择注册服务商"},
-                "initial_option": initial_option,
-                "options": account_options,
-                "name": "selected_reg_account_id",
-            },
-            {
-                "tag": "select_static",
-                "placeholder": {"tag": "plain_text", "content": "选择注册年限"},
-                "initial_option": {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
-                "options": [
-                    {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
-                    {"text": {"tag": "plain_text", "content": "2 年"}, "value": "2"},
-                    {"text": {"tag": "plain_text", "content": "3 年"}, "value": "3"},
-                ],
-                "name": "register_years",
-            },
-            {
-                "tag": "input",
-                "name": "reject_reason",
-                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-            },
-            {
-                "tag": "action",
-                "actions": [
+                "tag": "form",
+                "name": "domain_register_approval_form",
+                "elements": [
+                    {
+                        "tag": "select_static",
+                        "placeholder": {"tag": "plain_text", "content": "选择注册服务商"},
+                        "initial_option": initial_option_text,
+                        "options": account_options,
+                        "name": "selected_reg_account_id",
+                        "required": True,
+                    },
+                    {
+                        "tag": "select_static",
+                        "placeholder": {"tag": "plain_text", "content": "选择注册年限"},
+                        "initial_option": "1 年",
+                        "options": [
+                            {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
+                            {"text": {"tag": "plain_text", "content": "2 年"}, "value": "2"},
+                            {"text": {"tag": "plain_text", "content": "3 年"}, "value": "3"},
+                        ],
+                        "name": "register_years",
+                        "required": True,
+                    },
+                    {
+                        "tag": "input",
+                        "name": "reject_reason",
+                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                    },
                     {
                         "tag": "button",
+                        "name": "approve_domain_register",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "✅ 批准并执行"},
                         "type": "primary",
                         "value": {"action": "approve_doc_request", "request_id": req.id},
                     },
                     {
                         "tag": "button",
+                        "name": "reject_domain_register",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "❌ 拒绝"},
                         "type": "danger",
                         "value": {"action": "reject_doc_request", "request_id": req.id},
@@ -650,6 +658,7 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
     if len(records) > 12:
         preview += f"\n... 另有 {len(records) - 12} 条"
     account_options = _select_options(accounts, "provider_code")
+    initial_option_text = account_options[0].get("text", {}).get("content") if account_options else ""
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -674,33 +683,39 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
             {"tag": "hr"},
             {"tag": "div", "text": {"tag": "lark_md", "content": preview or "无记录"}},
             {
-                "tag": "select_static",
-                "placeholder": {"tag": "plain_text", "content": "选择 DNS 账号"},
-                "initial_option": account_options[0],
-                "options": account_options,
-                "name": "selected_dns_account_id",
-            },
-            {
-                "tag": "input",
-                "name": "approval_comment",
-                "placeholder": {"tag": "plain_text", "content": "审核备注（可选）"},
-            },
-            {
-                "tag": "input",
-                "name": "reject_reason",
-                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-            },
-            {
-                "tag": "action",
-                "actions": [
+                "tag": "form",
+                "name": "dns_doc_approval_form",
+                "elements": [
+                    {
+                        "tag": "select_static",
+                        "placeholder": {"tag": "plain_text", "content": "选择 DNS 账号"},
+                        "initial_option": initial_option_text,
+                        "options": account_options,
+                        "name": "selected_dns_account_id",
+                        "required": True,
+                    },
+                    {
+                        "tag": "input",
+                        "name": "approval_comment",
+                        "placeholder": {"tag": "plain_text", "content": "审核备注（可选）"},
+                    },
+                    {
+                        "tag": "input",
+                        "name": "reject_reason",
+                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                    },
                     {
                         "tag": "button",
+                        "name": "approve_dns_doc",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "✅ 批准并执行"},
                         "type": "primary",
                         "value": {"action": "approve_doc_request", "request_id": req.id},
                     },
                     {
                         "tag": "button",
+                        "name": "reject_dns_doc",
+                        "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "❌ 拒绝"},
                         "type": "danger",
                         "value": {"action": "reject_doc_request", "request_id": req.id},
