@@ -1339,24 +1339,30 @@ async def _handle_card_action(body: dict) -> dict:
                 return {"toast": {"type": "error", "content": "只有超级管理员可以审批此操作"}}
 
             if card_action == "approve_account_op":
-                result = conf_svc.approve_confirmation(
-                    confirmation_id=confirmation_id,
-                    approver_user_id=approver.id,
-                    approver_name=approver.name,
-                    approver_feishu_userid=operator_open_id,
+                confirmation = conf_svc.get_confirmation(confirmation_id)
+                if not confirmation or not confirmation.is_pending:
+                    return {"toast": {"type": "error", "content": "授权失败（已处理或不存在）"}}
+                _process_confirmation_in_background(
+                    confirmation_id,
+                    card_action,
+                    approver.id,
+                    approver.name,
+                    operator_open_id,
                 )
-                return {"toast": {"type": "success" if result else "error",
-                                  "content": "已授权执行" if result else "授权失败（已处理或不存在）"}}
+                return {"toast": {"type": "success", "content": "已受理，正在授权执行"}}
             else:
-                result = conf_svc.reject_confirmation(
-                    confirmation_id=confirmation_id,
-                    approver_user_id=approver.id,
-                    approver_name=approver.name,
-                    approver_feishu_userid=operator_open_id,
-                    reject_reason=_as_text(form_values.get("reject_reason")) or "未填写",
+                confirmation = conf_svc.get_confirmation(confirmation_id)
+                if not confirmation or not confirmation.is_pending:
+                    return {"toast": {"type": "error", "content": "拒绝失败（已处理或不存在）"}}
+                _process_confirmation_in_background(
+                    confirmation_id,
+                    card_action,
+                    approver.id,
+                    approver.name,
+                    operator_open_id,
+                    _as_text(form_values.get("reject_reason")) or "未填写",
                 )
-                return {"toast": {"type": "info" if result else "error",
-                                  "content": "已拒绝操作申请" if result else "拒绝失败（已处理或不存在）"}}
+                return {"toast": {"type": "info", "content": "已受理拒绝操作"}}
         finally:
             db.close()
     except Exception as e:
@@ -1422,6 +1428,47 @@ def _execute_request_in_background(request_id: str, label: str) -> None:
             db.close()
 
     threading.Thread(target=runner, name=f"feishu-{label}-{request_id[:8]}", daemon=True).start()
+
+
+def _process_confirmation_in_background(
+    confirmation_id: int,
+    card_action: str,
+    approver_user_id: int,
+    approver_name: str,
+    approver_feishu_userid: str,
+    reject_reason: str = "",
+) -> None:
+    """超管确认涉及写库和通知，放到后台避免飞书卡片 200341 超时。"""
+    import logging
+    import threading
+
+    def runner() -> None:
+        db = SessionLocal()
+        try:
+            from app.services.user_confirmation_service import UserOperationConfirmationService
+
+            conf_svc = UserOperationConfirmationService(db)
+            if card_action == "approve_account_op":
+                conf_svc.approve_confirmation(
+                    confirmation_id=confirmation_id,
+                    approver_user_id=approver_user_id,
+                    approver_name=approver_name,
+                    approver_feishu_userid=approver_feishu_userid,
+                )
+            else:
+                conf_svc.reject_confirmation(
+                    confirmation_id=confirmation_id,
+                    approver_user_id=approver_user_id,
+                    approver_name=approver_name,
+                    approver_feishu_userid=approver_feishu_userid,
+                    reject_reason=reject_reason or "未填写",
+                )
+        except Exception:
+            logging.getLogger(__name__).exception("超管确认后台处理失败: %s", confirmation_id)
+        finally:
+            db.close()
+
+    threading.Thread(target=runner, name=f"feishu-confirm-{confirmation_id}", daemon=True).start()
 
 
 async def _handle_doc_request_card_action(card_action: str, value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
