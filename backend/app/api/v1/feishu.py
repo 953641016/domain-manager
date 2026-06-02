@@ -763,11 +763,6 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
                         "placeholder": {"tag": "plain_text", "content": "审核备注（可选）"},
                     },
                     {
-                        "tag": "input",
-                        "name": "reject_reason",
-                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-                    },
-                    {
                         "tag": "button",
                         "name": "approve_dns_doc",
                         "action_type": "form_submit",
@@ -776,12 +771,39 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
                         "value": {"action": "approve_doc_request", "request_id": req.id},
                     },
                     {
-                        "tag": "button",
-                        "name": "reject_dns_doc",
-                        "action_type": "form_submit",
-                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
-                        "type": "danger",
-                        "value": {"action": "reject_doc_request", "request_id": req.id},
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "background_style": "default",
+                        "columns": [
+                            {
+                                "tag": "column",
+                                "width": "auto",
+                                "vertical_align": "top",
+                                "elements": [
+                                    {
+                                        "tag": "button",
+                                        "name": "reject_dns_doc",
+                                        "action_type": "form_submit",
+                                        "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                                        "type": "danger",
+                                        "value": {"action": "reject_doc_request", "request_id": req.id},
+                                    },
+                                ],
+                            },
+                            {
+                                "tag": "column",
+                                "width": "weighted",
+                                "weight": 1,
+                                "vertical_align": "top",
+                                "elements": [
+                                    {
+                                        "tag": "input",
+                                        "name": "reject_reason",
+                                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                                    },
+                                ],
+                            },
+                        ],
                     },
                 ],
             },
@@ -1290,7 +1312,8 @@ async def _handle_card_action(body: dict) -> dict:
 
         # DNS 解析申请审批（专员操作）
         if card_action in ("approve_dns_request", "reject_dns_request"):
-            return await _handle_dns_card_action(card_action, value, operator)
+            form_values = _extract_card_form_values(body)
+            return await _handle_dns_card_action(card_action, value, operator, form_values)
 
         # 新版文档按钮申请审批（域名购买 / DNS）
         if card_action in ("approve_doc_request", "reject_doc_request"):
@@ -1509,7 +1532,7 @@ def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
             pass
 
 
-async def _handle_dns_card_action(card_action: str, value: dict, operator: dict) -> dict:
+async def _handle_dns_card_action(card_action: str, value: dict, operator: dict, form_values: Optional[Dict[str, Any]] = None) -> dict:
     """专员点击 DNS 审批卡片后的处理（批准/拒绝）。"""
     import logging
     logger = logging.getLogger(__name__)
@@ -1553,9 +1576,10 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict)
                 logger.exception("DNS 申请执行失败: %s", e)
             return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
         else:
-            req_svc.reject_request(request_id, specialist.id, specialist.name, reason="专员拒绝")
+            reason = _as_text((form_values or {}).get("reject_reason")) or "专员拒绝"
+            req_svc.reject_request(request_id, specialist.id, specialist.name, reason=reason)
             requester = user_svc.get_user(request.requester_id)
-            _notify_request_rejected(request, requester, specialist, "专员拒绝")
+            _notify_request_rejected(request, requester, specialist, reason)
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
     except Exception as e:
         logger.exception("处理 DNS 审批卡片失败")

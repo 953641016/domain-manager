@@ -383,19 +383,51 @@ class FeishuService:
                 },
                 {"tag": "hr"},
                 {
-                    "tag": "action",
-                    "actions": [
+                    "tag": "form",
+                    "name": "dns_approval_form",
+                    "elements": [
                         {
                             "tag": "button",
+                            "name": "approve_dns_request",
+                            "action_type": "form_submit",
                             "text": {"tag": "plain_text", "content": "✅ 批准执行"},
                             "type": "primary",
                             "value": {"action": "approve_dns_request", "request_id": request_id},
                         },
                         {
-                            "tag": "button",
-                            "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
-                            "type": "danger",
-                            "value": {"action": "reject_dns_request", "request_id": request_id},
+                            "tag": "column_set",
+                            "flex_mode": "none",
+                            "background_style": "default",
+                            "columns": [
+                                {
+                                    "tag": "column",
+                                    "width": "auto",
+                                    "vertical_align": "top",
+                                    "elements": [
+                                        {
+                                            "tag": "button",
+                                            "name": "reject_dns_request",
+                                            "action_type": "form_submit",
+                                            "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
+                                            "type": "danger",
+                                            "value": {"action": "reject_dns_request", "request_id": request_id},
+                                        },
+                                    ],
+                                },
+                                {
+                                    "tag": "column",
+                                    "width": "weighted",
+                                    "weight": 1,
+                                    "vertical_align": "top",
+                                    "elements": [
+                                        {
+                                            "tag": "input",
+                                            "name": "reject_reason",
+                                            "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                                        },
+                                    ],
+                                },
+                            ],
                         },
                     ],
                 },

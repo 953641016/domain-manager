@@ -548,20 +548,21 @@ class UserOperationConfirmationService:
         receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation)
         desc = desc.replace("【需超级管理员确认】", "").strip()
+        processed_time = self._format_dt(confirmation.approved_at)
         if not approved:
             card_title = "❌ 操作申请被拒绝"
             card_color = "red"
             reason = confirmation.reject_reason or "未说明原因"
-            body = f"**操作**：{desc}\n**拒绝原因**：{reason}"
+            body = f"**操作**：{desc}\n**处理时间**：{processed_time}\n**拒绝原因**：{reason}"
         elif exec_error:
             card_title = "⚠️ 操作执行失败"
             card_color = "orange"
             friendly = self._friendly_error(exec_error)
-            body = f"**操作**：{desc}\n**原因**：{friendly}\n\n如有疑问请联系超级管理员"
+            body = f"**操作**：{desc}\n**处理时间**：{processed_time}\n**原因**：{friendly}\n\n如有疑问请联系超级管理员"
         else:
             card_title = "✅ 操作执行成功"
             card_color = "green"
-            body = f"**操作**：{desc}"
+            body = f"**操作**：{desc}\n**处理时间**：{processed_time}"
         result_card = {
             "config": {"wide_screen_mode": True},
             "header": {
@@ -598,12 +599,14 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(approver, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation).replace("【需超级管理员确认】", "").strip()
+        processed_time = self._format_dt(confirmation.approved_at)
         if not approved:
             title = "❌ 您已拒绝操作申请"
             color = "red"
             body = (
                 f"**操作**：{desc}\n"
                 f"**申请人**：{confirmation.initiator_name}\n"
+                f"**处理时间**：{processed_time}\n"
                 f"**拒绝理由**：{confirmation.reject_reason or '未填写'}"
             )
         elif exec_error:
@@ -612,6 +615,7 @@ class UserOperationConfirmationService:
             body = (
                 f"**操作**：{desc}\n"
                 f"**申请人**：{confirmation.initiator_name}\n"
+                f"**处理时间**：{processed_time}\n"
                 f"**失败原因**：{self._friendly_error(exec_error)}"
             )
         else:
@@ -619,7 +623,8 @@ class UserOperationConfirmationService:
             color = "green"
             body = (
                 f"**操作**：{desc}\n"
-                f"**申请人**：{confirmation.initiator_name}"
+                f"**申请人**：{confirmation.initiator_name}\n"
+                f"**处理时间**：{processed_time}"
             )
         card = {
             "config": {"wide_screen_mode": True},
@@ -943,11 +948,6 @@ class UserOperationConfirmationService:
                 "name": "account_op_approval_form",
                 "elements": [
                     {
-                        "tag": "input",
-                        "name": "reject_reason",
-                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-                    },
-                    {
                         "tag": "button",
                         "name": "approve_account_op",
                         "action_type": "form_submit",
@@ -956,12 +956,39 @@ class UserOperationConfirmationService:
                         "value": {"action": "approve_account_op", "confirmation_id": str(confirmation.id)},
                     },
                     {
-                        "tag": "button",
-                        "name": "reject_account_op",
-                        "action_type": "form_submit",
-                        "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
-                        "type": "danger",
-                        "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)},
+                        "tag": "column_set",
+                        "flex_mode": "none",
+                        "background_style": "default",
+                        "columns": [
+                            {
+                                "tag": "column",
+                                "width": "auto",
+                                "vertical_align": "top",
+                                "elements": [
+                                    {
+                                        "tag": "button",
+                                        "name": "reject_account_op",
+                                        "action_type": "form_submit",
+                                        "text": {"tag": "plain_text", "content": "❌ 拒绝申请"},
+                                        "type": "danger",
+                                        "value": {"action": "reject_account_op", "confirmation_id": str(confirmation.id)},
+                                    },
+                                ],
+                            },
+                            {
+                                "tag": "column",
+                                "width": "weighted",
+                                "weight": 1,
+                                "vertical_align": "top",
+                                "elements": [
+                                    {
+                                        "tag": "input",
+                                        "name": "reject_reason",
+                                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+                                    },
+                                ],
+                            },
+                        ],
                     },
                 ],
             },
