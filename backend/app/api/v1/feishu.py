@@ -562,7 +562,7 @@ def _reg_account_options_with_prices(accounts: List[Any], quotes: Dict[str, Dict
         quote = quotes.get(str(account.id))
         price_text = _format_price_quote(quote)
         options.append({
-            "text": {"tag": "plain_text", "content": f"{account.name}（{account.registrar_code}｜{price_text}）"},
+            "text": {"tag": "plain_text", "content": f"{account.name}（{account.registrar_code}，预估价：{price_text}）"},
             "value": str(account.id),
         })
     return options
@@ -574,11 +574,6 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
     account_options = _reg_account_options_with_prices(accounts, quotes)
     default_account_id = str(data.get("default_reg_account_id") or (accounts[0].id if accounts else ""))
     initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
-    default_quote = quotes.get(default_account_id) or {}
-    quote_lines = "\n".join(
-        f"• {account.name}（{account.registrar_code}）：{_format_price_quote(quotes.get(str(account.id)))}"
-        for account in accounts
-    )
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -595,15 +590,14 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         f"**申请人**：{applicant.name}\n"
                         f"**申请时间**：{_format_card_time(req.created_at)}\n"
                         f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
-                        f"**默认注册服务商**：{initial_option['text']['content']}\n"
-                        f"**默认预估价格**：{_format_price_quote(default_quote)}"
+                        f"**注册服务商**：请在下方选择\n"
+                        f"**预估价格**：随注册服务商选项展示，最终以审批执行时重新查价为准"
                     ),
                 },
             },
-            {"tag": "div", "text": {"tag": "lark_md", "content": f"**服务商报价**：\n{quote_lines or '暂无报价'}"}},
             {
                 "tag": "select_static",
-                "placeholder": {"tag": "plain_text", "content": "选择注册厂商账号"},
+                "placeholder": {"tag": "plain_text", "content": "选择注册服务商"},
                 "initial_option": initial_option,
                 "options": account_options,
                 "name": "selected_reg_account_id",
