@@ -6,7 +6,7 @@
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 
@@ -60,7 +60,7 @@ class FeishuDocParser:
         if doc_format != "standard_v1":
             raise ValueError(f"暂不支持的文档格式: {doc_format}")
 
-        doc_token = self.extract_doc_token(doc_url)
+        doc_token = self.resolve_doc_token(doc_url)
         title = self.get_document_title(doc_token)
         content = self.get_raw_content(doc_token)
         lines = self._normal_lines(content)
@@ -105,11 +105,79 @@ class FeishuDocParser:
 
     @staticmethod
     def extract_doc_token(doc_url: str) -> str:
-        parsed = urlparse(doc_url)
-        match = re.search(r"/docx/([A-Za-z0-9]+)", parsed.path)
-        if not match:
-            raise ValueError("无法从 doc_url 中解析 docx token")
-        return match.group(1)
+        doc_token = FeishuDocParser._extract_token_by_type(doc_url, "docx")
+        if doc_token:
+            return doc_token
+        raw_token = FeishuDocParser._extract_direct_token(doc_url)
+        if raw_token:
+            return raw_token
+        raise ValueError("无法从 doc_url 中解析 docx token，请传入飞书 docx 链接或 docx token")
+
+    def resolve_doc_token(self, doc_url: str) -> str:
+        doc_token = self._extract_token_by_type(doc_url, "docx")
+        if doc_token:
+            return doc_token
+        wiki_token = self._extract_token_by_type(doc_url, "wiki")
+        if wiki_token:
+            return self.resolve_wiki_doc_token(wiki_token)
+        raw_token = self._extract_direct_token(doc_url)
+        if raw_token:
+            return raw_token
+        raise ValueError("无法从 doc_url 中解析 docx/wiki token，请传入飞书 docx 链接、wiki 链接或 docx token")
+
+    def resolve_wiki_doc_token(self, wiki_token: str) -> str:
+        data = self._get(f"/open-apis/wiki/v2/spaces/get_node?token={wiki_token}")
+        node = data.get("node") or {}
+        obj_type = node.get("obj_type")
+        obj_token = node.get("obj_token")
+        if obj_type != "docx" or not obj_token:
+            raise ValueError(f"Wiki 节点不是新版文档 docx，无法解析内容: obj_type={obj_type or '未知'}")
+        return obj_token
+
+    @staticmethod
+    def _doc_url_candidates(doc_url: str) -> List[str]:
+        value = (doc_url or "").strip()
+        if not value:
+            return []
+
+        candidates = [value]
+        for _ in range(2):
+            decoded = unquote(candidates[-1])
+            if decoded == candidates[-1]:
+                break
+            candidates.append(decoded)
+
+        for candidate in list(candidates):
+            parsed = urlparse(candidate)
+            query = parse_qs(parsed.query)
+            for key in ("doc_url", "url", "href", "link", "target"):
+                for nested in query.get(key, []):
+                    if nested:
+                        candidates.append(nested)
+                        decoded_nested = unquote(nested)
+                        if decoded_nested != nested:
+                            candidates.append(decoded_nested)
+        return candidates
+
+    @staticmethod
+    def _extract_token_by_type(doc_url: str, doc_type: str) -> Optional[str]:
+        for candidate in FeishuDocParser._doc_url_candidates(doc_url):
+            text = unquote(candidate)
+            markdown_match = re.search(r"\]\((https?://[^)]+)\)", text)
+            if markdown_match:
+                text = markdown_match.group(1)
+            match = re.search(rf"(?:^|/){re.escape(doc_type)}/([A-Za-z0-9]+)", urlparse(text).path or text)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
+    def _extract_direct_token(doc_url: str) -> Optional[str]:
+        for candidate in FeishuDocParser._doc_url_candidates(doc_url):
+            text = unquote(candidate)
+            if re.fullmatch(r"[A-Za-z0-9]{16,}", text):
+                return text
+        return None
 
     def get_document_title(self, doc_token: str) -> str:
         data = self._get(f"/open-apis/docx/v1/documents/{doc_token}")
