@@ -504,12 +504,35 @@ def _format_price_quote(quote: Optional[Dict[str, Any]]) -> str:
             return "价格获取失败"
         return message or "价格获取失败"
     if quote.get("available") is False:
+        if quote.get("message") == "domain_unavailable":
+            return "不可注册"
         return quote.get("message") or "不可注册"
     price = quote.get("price")
     currency = quote.get("currency") or "USD"
     if price is None:
         return "可注册，价格未返回"
     return f"{price} {currency}"
+
+
+def _registrar_display_name(code: Optional[str]) -> str:
+    mapping = {
+        "cloudflare": "Cloudflare",
+        "godaddy": "GoDaddy",
+    }
+    return mapping.get((code or "").lower(), code or "未知注册商")
+
+
+def _short_account_name(name: Optional[str]) -> str:
+    value = (name or "").strip()
+    if not value:
+        return "未命名账号"
+    if "@" in value:
+        value = value.split("@", 1)[0]
+    return value if len(value) <= 18 else f"{value[:15]}..."
+
+
+def _reg_account_label(account: Any) -> str:
+    return f"{_registrar_display_name(account.registrar_code)} | {_short_account_name(account.name)}"
 
 
 def _quote_reg_account_prices(db: Session, domain: str, accounts: List[Any]) -> Dict[str, Dict[str, Any]]:
@@ -559,10 +582,8 @@ def _quote_reg_account_prices(db: Session, domain: str, accounts: List[Any]) -> 
 def _reg_account_options_with_prices(accounts: List[Any], quotes: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
     options = []
     for account in accounts:
-        quote = quotes.get(str(account.id))
-        price_text = _format_price_quote(quote)
         options.append({
-            "text": {"tag": "plain_text", "content": f"{price_text} | {account.registrar_code} | {account.name}"},
+            "text": {"tag": "plain_text", "content": _reg_account_label(account)},
             "value": str(account.id),
         })
     return options
@@ -573,7 +594,7 @@ def _reg_price_quote_lines(accounts: List[Any], quotes: Dict[str, Dict[str, Any]
     for account in accounts:
         quote = quotes.get(str(account.id))
         price_text = _format_price_quote(quote)
-        lines.append(f"- **{account.name}**（{account.registrar_code}）：{price_text}")
+        lines.append(f"- **{_registrar_display_name(account.registrar_code)} | {_short_account_name(account.name)}**：{price_text}")
     return "\n".join(lines) or "暂无可用注册服务商报价"
 
 
@@ -583,8 +604,16 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
     account_options = _reg_account_options_with_prices(accounts, quotes)
     price_quote_lines = _reg_price_quote_lines(accounts, quotes)
     default_account_id = str(data.get("default_reg_account_id") or (accounts[0].id if accounts else ""))
+    default_account = next((account for account in accounts if str(account.id) == default_account_id), accounts[0] if accounts else None)
+    default_price_text = _format_price_quote(quotes.get(str(default_account.id))) if default_account else "暂无报价"
     initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
     initial_option_text = initial_option.get("text", {}).get("content") or ""
+    default_selection_text = (
+        f"默认选择：{_reg_account_label(default_account)}；1 年；{default_price_text}。"
+        "飞书暂不支持下拉选项联动显示，实际执行以点击批准时最终选择的注册商、账号和年限为准。"
+        if default_account
+        else "暂无默认选择"
+    )
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -660,6 +689,10 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         "value": {"action": "reject_doc_request", "request_id": req.id},
                     },
                 ],
+            },
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": default_selection_text}],
             },
             {"tag": "note", "elements": [{"tag": "plain_text", "content": f"审批人：{reviewer.name}；申请编号：#{req.id[:8]}"}]},
         ],
