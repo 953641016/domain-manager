@@ -5,7 +5,7 @@
 import requests
 import json
 from typing import Optional, Dict, Any, List
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.config import Config
 
 
@@ -330,8 +330,20 @@ class FeishuService:
         dns_provider: str,
         records: List[Dict[str, Any]],
         receive_id_type: str = "open_id",
+        application_time: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """向专员发送 DNS 解析批量审批卡片。"""
+        def _fmt_time(value) -> str:
+            if not value:
+                return "—"
+            try:
+                if value.tzinfo is None:
+                    value = value.replace(tzinfo=timezone.utc)
+                value = value.astimezone(timezone(timedelta(hours=8)))
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(value)
+
         record_lines = "\n".join(
             f"• **{r.get('hostname', r.get('Hostname', ''))}**  "
             f"{r.get('type', r.get('Type', ''))}  →  "
@@ -357,6 +369,7 @@ class FeishuService:
                         "tag": "lark_md",
                         "content": (
                             f"**申请人**：{requester_name}\n"
+                            f"**申请时间**：{_fmt_time(application_time)}\n"
                             f"**域名**：{domain}\n"
                             f"**解析平台**：{provider_label}\n"
                             f"**记录数**：{len(records)} 条"

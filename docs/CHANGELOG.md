@@ -20,6 +20,8 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **飞书文档按钮幂等重发**（`backend/app/api/v1/feishu.py`、`backend/app/services/request_service.py`）：域名购买已有待审批申请时不再返回 409，而是刷新报价并重新发送审批卡；已批准/已完成的同域名购买申请会直接返回已处理，避免重复购买。
+- **审核卡片申请时间**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_service.py`）：域名购买、DNS 解析、旧版确认页/多维表格审批卡片均展示申请时间；重发响应只返回飞书发送状态与消息 ID，避免响应内容过长。
 - **注册商 API 超时保护**（`backend/app/adapters/cloudflare.py`、`backend/app/adapters/godaddy.py`）：Cloudflare/GoDaddy 查价与注册相关 HTTP 请求增加 4 秒超时，避免飞书文档按钮提交时被外部服务慢响应拖到客户端超时。
 - **飞书按钮参数兼容**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_service.py`）：`POST /api/v1/feishu/doc-button/submit` 兼容飞书多维表格以 Query 参数提交；`applicant_feishu_id` 支持传公司内唯一姓名，后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - **Cloudflare 注册商查价接口**（`backend/app/adapters/cloudflare.py`）：更新为官方 `domain-check` 接口，解析 `pricing.registration_cost` 作为注册价格。

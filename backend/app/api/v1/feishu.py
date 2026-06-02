@@ -42,6 +42,19 @@ DOC_BUTTON_ACTIONS = {
 }
 
 
+def _format_card_time(value) -> str:
+    if not value:
+        return "—"
+    try:
+        from datetime import timedelta, timezone
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        value = value.astimezone(timezone(timedelta(hours=8)))
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(value)
+
+
 class FeishuUserInfo(BaseModel):
     """飞书用户信息响应模型"""
     user_id: str
@@ -362,9 +375,47 @@ def submit_doc_button_request(
 
     req_svc = RequestService(db)
     if parsed.request_type == "domain_register":
-        existing = req_svc.get_pending_domain_request(parsed.domain)
+        existing = req_svc.get_active_domain_register_request(parsed.domain)
         if existing:
-            raise HTTPException(status_code=409, detail=f"域名 {parsed.domain} 已有待审批申请（ID: {existing.id}）")
+            if existing.status != "pending":
+                return {
+                    "success": True,
+                    "already_processed": True,
+                    "request_id": existing.id,
+                    "status": existing.status,
+                    "action": body.action,
+                    "domain": parsed.domain,
+                    "records_count": 0,
+                    "message": "该域名购买申请已处理，不会重复提交或重复购买",
+                }
+            existing_data = dict(existing.request_data or {})
+            existing_data.update({
+                "action": body.action,
+                "action_label": action_meta["label"],
+                "doc_url": body.doc_url,
+                "doc_token": parsed.doc_token,
+                "doc_title": parsed.title,
+                "doc_format": body.doc_format,
+                "domain": parsed.domain,
+                "price_quotes": request_data.get("price_quotes"),
+                "default_reg_account_id": request_data.get("default_reg_account_id"),
+                "default_registrar_code": request_data.get("default_registrar_code"),
+            })
+            existing.request_data = existing_data
+            db.commit()
+            db.refresh(existing)
+            send_result = _send_doc_request_approval_card(existing, applicant, specialist, accounts)
+            return {
+                "success": True,
+                "resent": True,
+                "request_id": existing.id,
+                "action": body.action,
+                "domain": parsed.domain,
+                "records_count": len((existing.request_data or {}).get("records") or []),
+                "message": "该域名已有待审批申请，已重新发送审批卡片",
+                "feishu_code": send_result.get("code"),
+                "feishu_message_id": (send_result.get("data") or {}).get("message_id"),
+            }
 
     req = req_svc.create_request(
         data=RequestCreate(
@@ -377,7 +428,19 @@ def submit_doc_button_request(
         requester_name=applicant.name,
     )
 
-    if parsed.request_type == "domain_register":
+    result = _send_doc_request_approval_card(req, applicant, specialist, accounts)
+
+    return {
+        "success": True,
+        "request_id": req.id,
+        "action": body.action,
+        "domain": parsed.domain,
+        "records_count": len(parsed.records),
+    }
+
+
+def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[Any]) -> Dict[str, Any]:
+    if req.type == "domain_register":
         card = _build_domain_purchase_approval_card(req, applicant, specialist, accounts)
     else:
         card = _build_dns_doc_approval_card(req, applicant, specialist, accounts)
@@ -389,14 +452,7 @@ def submit_doc_button_request(
     result = feishu_service.send_card_message(receive_id, card, receive_type)
     if result.get("code") != 0:
         raise HTTPException(status_code=502, detail=f"发送审批卡片失败: {result}")
-
-    return {
-        "success": True,
-        "request_id": req.id,
-        "action": body.action,
-        "domain": parsed.domain,
-        "records_count": len(parsed.records),
-    }
+    return result
 
 
 def _get_reviewable_reg_accounts(db: Session, reviewer) -> List[Any]:
@@ -439,7 +495,14 @@ def _format_price_quote(quote: Optional[Dict[str, Any]]) -> str:
     if not quote:
         return "价格获取失败"
     if not quote.get("check_successful"):
-        return quote.get("message") or "价格获取失败"
+        message = quote.get("message") or ""
+        if "Network is unreachable" in message or "Failed to establish a new connection" in message:
+            return "价格获取失败：网络不可达"
+        if "timeout" in message.lower() or "timed out" in message.lower():
+            return "价格获取失败：接口超时"
+        if len(message) > 40:
+            return "价格获取失败"
+        return message or "价格获取失败"
     if quote.get("available") is False:
         return quote.get("message") or "不可注册"
     price = quote.get("price")
@@ -530,6 +593,7 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                     "content": (
                         f"**域名**：{req.domain_name}\n"
                         f"**申请人**：{applicant.name}\n"
+                        f"**申请时间**：{_format_card_time(req.created_at)}\n"
                         f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
                         f"**默认注册服务商**：{initial_option['text']['content']}\n"
                         f"**默认预估价格**：{_format_price_quote(default_quote)}"
@@ -607,6 +671,7 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
                         f"**申请类型**：{data.get('action_label', req.type)}\n"
                         f"**主域名**：{req.domain_name}\n"
                         f"**申请人**：{applicant.name}\n"
+                        f"**申请时间**：{_format_card_time(req.created_at)}\n"
                         f"**记录数**：{len(records)}\n"
                         f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})"
                     ),
@@ -1034,11 +1099,18 @@ def submit_request(
                     dns_provider=body.section,
                     records=body.records,
                     receive_id_type=receive_type,
+                    application_time=req.created_at,
                 )
             else:
                 feishu_service.send_text_message(
                     receive_id=receive_id,
-                    content=f"📋 域名注册申请\n申请人：{current_user.name}\n域名：{body.domain}\n请登录 Web 后台审批。",
+                    content=(
+                        f"📋 域名注册申请\n"
+                        f"申请人：{current_user.name}\n"
+                        f"申请时间：{_format_card_time(req.created_at)}\n"
+                        f"域名：{body.domain}\n"
+                        f"请登录 Web 后台审批。"
+                    ),
                     receive_id_type=receive_type,
                 )
 
@@ -1123,10 +1195,11 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
                 request_id=req.id,
                 requester_name=user.name,
                 domain=body.domain,
-                dns_provider=body.dns_provider,
-                records=records,
-                receive_id_type=receive_type,
-            )
+                    dns_provider=body.dns_provider,
+                    records=records,
+                    receive_id_type=receive_type,
+                    application_time=req.created_at,
+                )
 
     return {"success": True, "request_id": req.id, "records_count": len(records)}
 

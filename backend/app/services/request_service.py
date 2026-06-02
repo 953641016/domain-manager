@@ -212,6 +212,14 @@ class RequestService:
             Request.status == "pending",
         ).first()
 
+    def get_active_domain_register_request(self, domain_name: str) -> Optional[Request]:
+        """查询某域名是否已有待处理/已执行的注册申请，避免重复购买。"""
+        return self.db.query(Request).filter(
+            Request.type == "domain_register",
+            Request.domain_name == domain_name,
+            Request.status.in_(["pending", "approved", "completed"]),
+        ).order_by(Request.created_at.desc()).first()
+
     def get_my_requests(self, requester_id: int, skip: int = 0, limit: int = 100) -> List[Request]:
         """获取我的申请"""
         return self.db.query(Request).filter(
