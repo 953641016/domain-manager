@@ -43,6 +43,13 @@ def _with_owner(response_cls, account, owner_map: dict):
     return obj
 
 
+def _with_dns_account_name(domain):
+    """将域名 ORM 对象转换为响应，并附带 DNS 账号名称"""
+    obj = DomainResponse.model_validate(domain)
+    obj.dns_account_name = domain.dns_account.name if domain.dns_account else None
+    return obj
+
+
 # ========== 域名管理 ==========
 
 @router.get("", response_model=DomainListResponse)
@@ -87,7 +94,7 @@ def get_domains(
 
     return DomainListResponse(
         total=total,
-        items=[DomainResponse.model_validate(d) for d in domains]
+        items=[_with_dns_account_name(d) for d in domains]
     )
 
 
@@ -116,7 +123,7 @@ def get_domain(
             detail="无权查看此域名"
         )
 
-    return DomainResponse.model_validate(domain)
+    return _with_dns_account_name(domain)
 
 
 
@@ -143,7 +150,7 @@ def get_expiring_domains(
 
     return {
         "total": len(domains),
-        "items": [DomainResponse.model_validate(d) for d in domains]
+        "items": [_with_dns_account_name(d) for d in domains]
     }
 
 

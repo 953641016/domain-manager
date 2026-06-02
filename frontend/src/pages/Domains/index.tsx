@@ -10,6 +10,9 @@ interface Domain {
   id: number;
   name: string;
   registrar_code: string;
+  dns_provider_code?: string;
+  dns_account_id?: number | null;
+  dns_account_name?: string | null;
   status: string;
   expiration_date: string;
   auto_renew: boolean;
@@ -126,6 +129,9 @@ export default function DomainsPage() {
                       注册商
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      DNS账号
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       状态
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -149,6 +155,12 @@ export default function DomainsPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="text-sm text-gray-500">{domain.registrar_code || '-'}</div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm text-gray-900">{domain.dns_account_name || '-'}</div>
+                        {domain.dns_provider_code && (
+                          <div className="text-xs text-gray-400">{domain.dns_provider_code}</div>
+                        )}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         {getStatusBadge(domain.status)}
@@ -198,6 +210,9 @@ export default function DomainsPage() {
                   <div className="flex items-center justify-between mt-2 text-xs text-gray-500">
                     <span>注册商: {domain.registrar_code || '-'}</span>
                     <span>到期: {formatDate(domain.expiration_date)}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-gray-500">
+                    DNS账号: {domain.dns_account_name || '-'}
                   </div>
                   <div className="flex items-center justify-between mt-3 pt-2 border-t border-gray-100">
                     <div className="text-xs text-gray-500">

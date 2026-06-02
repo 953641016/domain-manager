@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **域名列表与 DNS 账号表单**（`backend/app/api/v1/domains.py`、`backend/app/schemas/domain.py`、`frontend/src/pages/Domains/index.tsx`、`frontend/src/pages/Config.tsx`）：域名列表新增所属 DNS 账号展示；DNS账号新增/编辑表单按 Cloudflare/DNSPod 显示 Token、Account ID、Secret ID 等对应字段说明。
 - **超管审批结果通知时间字段**（`backend/app/services/user_confirmation_service.py`）：修复超管审核账号/默认配置申请后结果通知误读 `approved_at` 导致飞书卡片提示处理失败的问题，改为使用确认模型实际字段 `confirmed_at`。
 - **飞书文档链接兼容**（`backend/app/services/feishu_doc_parser.py`）：`doc_url` 解析支持直接 token、未编码/多次编码链接、Markdown 链接、嵌套链接以及飞书 Wiki 链接；Wiki 链接会先通过 Wiki 节点接口解析真实 docx token。
 - **用户管理卡片专员显示**（`backend/app/services/user_confirmation_service.py`）：用户管理授权申请、审批结果、目标用户变更通知中的“归属专员”由数字 ID 改为专员姓名显示。

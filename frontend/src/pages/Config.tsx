@@ -673,11 +673,40 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
     };
   };
 
+  const getDnsCredentialLabels = (providerCode: string) => {
+    if (providerCode === 'cloudflare') {
+      return {
+        keyLabel: 'API Token',
+        keyPlaceholder: editingDnsAccount ? '留空表示不修改' : '请输入 Cloudflare API Token',
+        secretLabel: 'Account ID（可选）',
+        secretPlaceholder: editingDnsAccount ? '留空表示不修改' : 'Cloudflare DNS 通常无需填写',
+        hint: 'Cloudflare DNS 解析主要使用 API Token；Token 需包含 Zone:Read 和 DNS:Edit 权限。',
+      };
+    }
+    if (providerCode === 'dnspod') {
+      return {
+        keyLabel: 'Secret ID',
+        keyPlaceholder: editingDnsAccount ? '留空表示不修改' : '请输入 DNSPod Secret ID',
+        secretLabel: 'Secret Key',
+        secretPlaceholder: editingDnsAccount ? '留空表示不修改' : '请输入 DNSPod Secret Key',
+        hint: 'DNSPod 使用 Secret ID + Secret Key 调用解析接口。',
+      };
+    }
+    return {
+      keyLabel: 'API Key / Token',
+      keyPlaceholder: editingDnsAccount ? '留空表示不修改' : '请输入 API Key 或 Token',
+      secretLabel: 'API Secret / Account ID',
+      secretPlaceholder: editingDnsAccount ? '留空表示不修改' : '请输入 API Secret 或 Account ID',
+      hint: '不同 DNS 服务商凭据字段含义不同，请按服务商要求填写。',
+    };
+  };
+
   /** 判断当前用户是否可对某账号执行写操作（编辑/删除） */
   const canEditAccount = (ownerId: number | null) =>
     isSuperAdmin || ownerId === currentUser.id;
 
   const regCredentialLabels = getRegCredentialLabels(regForm.registrar_code);
+  const dnsCredentialLabels = getDnsCredentialLabels(dnsForm.provider_code);
 
   if (loading) {
     return (
@@ -1278,18 +1307,19 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{dnsCredentialLabels.keyLabel}</label>
                         <input type="password" value={dnsForm.api_key}
                           onChange={(e) => setDnsForm({ ...dnsForm, api_key: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入 API Key'} />
+                          placeholder={dnsCredentialLabels.keyPlaceholder} />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{dnsCredentialLabels.secretLabel}</label>
                         <input type="password" value={dnsForm.api_secret}
                           onChange={(e) => setDnsForm({ ...dnsForm, api_secret: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingDnsAccount ? '留空表示不修改' : '请输入 API Secret'} />
+                          placeholder={dnsCredentialLabels.secretPlaceholder} />
+                        <p className="text-xs text-gray-500 mt-1">{dnsCredentialLabels.hint}</p>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>

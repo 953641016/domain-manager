@@ -48,6 +48,7 @@ class DomainResponse(BaseModel):
     reg_account_id: Optional[int] = None
     dns_provider_code: Optional[str] = None
     dns_account_id: Optional[int] = None
+    dns_account_name: Optional[str] = None
     status: str
     registration_date: Optional[datetime] = None
     expiration_date: Optional[datetime] = None
