@@ -1465,34 +1465,46 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
 
 def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
     label = "域名购买" if req.type == "domain_register" else "DNS 解析"
+    processed_time = _format_card_time(getattr(req, "approved_at", None))
     targets = []
     if applicant:
         targets.append((
             applicant,
+            f"❌ {label}申请已拒绝",
             (
-                f"❌ {label}申请已拒绝\n"
-                f"域名：{req.domain_name}\n"
-                f"审核人：{getattr(reviewer, 'name', '未知')}\n"
-                f"拒绝理由：{reason or '未填写'}"
+                f"**域名**：{req.domain_name}\n"
+                f"**审核人**：{getattr(reviewer, 'name', '未知')}\n"
+                f"**处理时间**：{processed_time}\n"
+                f"**拒绝理由**：{reason or '未填写'}"
             ),
         ))
     if reviewer and (not applicant or reviewer.id != applicant.id):
         targets.append((
             reviewer,
+            f"❌ 您已拒绝{label}申请",
             (
-                f"❌ 您已拒绝{label}申请\n"
-                f"域名：{req.domain_name}\n"
-                f"申请人：{getattr(applicant, 'name', req.requester_name)}\n"
-                f"拒绝理由：{reason or '未填写'}"
+                f"**域名**：{req.domain_name}\n"
+                f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+                f"**处理时间**：{processed_time}\n"
+                f"**拒绝理由**：{reason or '未填写'}"
             ),
         ))
-    for user, content in targets:
+    for user, title, content in targets:
         receive_id = getattr(user, "feishu_open_id", None) or getattr(user, "feishu_user_id", None)
         if not receive_id:
             continue
         receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
         try:
-            feishu_service.send_text_message(receive_id, content, receive_type)
+            feishu_service.send_card_message(receive_id, {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "red",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                ],
+            }, receive_type)
         except Exception:
             pass
 

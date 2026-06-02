@@ -8,7 +8,7 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -271,25 +271,34 @@ class ExecutionService:
         success = bool(result.get("success"))
         requester = request.requester
         approver = request.approver
+        processed_time = self._format_notify_time(getattr(request, "approved_at", None))
 
         # 业务同事：简化通知（不含技术细节）
         if requester:
             if success:
-                msg = (f"✅ 您的{type_label}申请已完成\n"
-                       f"域名：{request.domain_name}")
+                title = f"✅ 您的{type_label}申请已完成"
+                color = "green"
+                body = (
+                    f"**域名**：{request.domain_name}\n"
+                    f"**处理时间**：{processed_time}"
+                )
             else:
-                msg = (f"❌ 您的{type_label}申请未能完成\n"
-                       f"域名：{request.domain_name}\n"
-                       f"请联系域名专员了解详情并重新提交。")
-            self._send(requester, msg)
+                title = f"❌ 您的{type_label}申请未能完成"
+                color = "red"
+                body = (
+                    f"**域名**：{request.domain_name}\n"
+                    f"**处理时间**：{processed_time}\n"
+                    "请联系域名专员了解详情并重新提交。"
+                )
+            self._send_card(requester, title, color, body)
 
         # 域名专员/审批人：完整信息（含失败原因）
         if approver and (not requester or approver.id != requester.id):
-            detail = self._build_specialist_message(request, result, type_label, success)
-            self._send(approver, detail)
+            title, color, detail = self._build_specialist_card(request, result, type_label, success)
+            self._send_card(approver, title, color, detail)
 
-    def _build_specialist_message(self, request: Request, result: Dict[str, Any],
-                                  type_label: str, success: bool) -> str:
+    def _build_specialist_card(self, request: Request, result: Dict[str, Any],
+                               type_label: str, success: bool) -> tuple[str, str, str]:
         # DNS 可能部分成功，单独标注
         if request.type != "domain_register":
             total = result.get("total")
@@ -298,34 +307,34 @@ class ExecutionService:
         else:
             is_partial = False
         if is_partial:
-            icon, label = "⚠️", "部分成功"
+            icon, label, color = "⚠️", "部分成功", "orange"
         elif success:
-            icon, label = "✅", "成功"
+            icon, label, color = "✅", "成功", "green"
         else:
-            icon, label = "❌", "失败"
+            icon, label, color = "❌", "失败", "red"
         head = f"{icon} {type_label}{label}"
-        lines = [head,
-                 f"域名：{request.domain_name}",
-                 f"申请人：{request.requester_name}"]
+        lines = [f"**域名**：{request.domain_name}",
+                 f"**申请人**：{request.requester_name}",
+                 f"**处理时间**：{self._format_notify_time(getattr(request, 'approved_at', None))}"]
 
         if request.type == "domain_register":
             if result.get("reg_account_name"):
-                lines.append(f"注册账号：{result['reg_account_name']}")
+                lines.append(f"**注册账号**：{result['reg_account_name']}")
             if result.get("price") is not None:
-                lines.append(f"价格：{result.get('price')} {result.get('currency', '')}".strip())
+                lines.append(f"**价格**：{result.get('price')} {result.get('currency', '')}".strip())
             if success:
                 if result.get("expiration_date"):
-                    lines.append(f"到期时间：{result['expiration_date']}")
+                    lines.append(f"**到期时间**：{result['expiration_date']}")
                 if result.get("order_id"):
-                    lines.append(f"订单号：{result['order_id']}")
+                    lines.append(f"**订单号**：{result['order_id']}")
             else:
-                lines.append(f"失败原因：{result.get('error') or result.get('message') or '未知错误'}")
+                lines.append(f"**失败原因**：{result.get('error') or result.get('message') or '未知错误'}")
         else:  # dns_record
             if result.get("dns_account_name"):
-                lines.append(f"解析账号：{result['dns_account_name']}")
+                lines.append(f"**解析账号**：{result['dns_account_name']}")
             total = result.get("total")
             if total is not None:
-                lines.append(f"记录数：成功 {result.get('success_count', 0)} / 共 {total}")
+                lines.append(f"**记录数**：成功 {result.get('success_count', 0)} / 共 {total}")
             for item in (result.get("records") or []):
                 rec = item.get("record", {})
                 flag = "✓" if item.get("status") == "success" else "✗"
@@ -334,9 +343,34 @@ class ExecutionService:
                     line += f"（{item['message']}）"
                 lines.append(line)
             if not success and result.get("error"):
-                lines.append(f"失败原因：{result['error']}")
+                lines.append(f"**失败原因**：{result['error']}")
 
-        return "\n".join(lines)
+        return head, color, "\n".join(lines)
+
+    def _send_card(self, user, title: str, color: str, content: str) -> None:
+        receive_id = None
+        receive_type = "open_id"
+        if getattr(user, "feishu_open_id", None):
+            receive_id, receive_type = user.feishu_open_id, "open_id"
+        elif getattr(user, "feishu_user_id", None):
+            receive_id, receive_type = user.feishu_user_id, "user_id"
+        if not receive_id:
+            logger.info("用户 %s 无飞书ID，跳过通知", getattr(user, "name", "?"))
+            return
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": color,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+            ],
+        }
+        try:
+            self.feishu.send_card_message(receive_id, card, receive_type)
+        except Exception:
+            logger.exception("发送飞书卡片通知失败")
 
     def _send(self, user, content: str) -> None:
         """向用户发送飞书文本消息，失败不影响主流程"""
@@ -353,6 +387,18 @@ class ExecutionService:
             self.feishu.send_text_message(receive_id, content, receive_type)
         except Exception:
             logger.exception("发送飞书通知失败")
+
+    @staticmethod
+    def _format_notify_time(value) -> str:
+        if not value:
+            value = datetime.now(timezone.utc)
+        try:
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            value = value.astimezone(timezone(timedelta(hours=8)))
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(value)
 
     # ==================== 工具方法 ====================
 

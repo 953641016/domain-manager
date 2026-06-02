@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **审批结果通知卡片化**（`backend/app/api/v1/feishu.py`、`backend/app/services/execution_service.py`）：文档按钮申请拒绝、通过完成、执行失败通知改为飞书卡片展示，并统一显示处理时间。
 - **飞书审批卡片表单渲染**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_confirmation_service.py`）：按飞书 JSON 1.0 表单容器规范，将注册服务商/DNS账号下拉、拒绝理由输入框与提交按钮放入 `form`，并修正 `select_static.initial_option` 为文本值，避免控件被过滤或卡片 JSON 解析失败。
 - **域名购买报价可见性**（`backend/app/api/v1/feishu.py`）：购买域名审批卡片正文新增完整“服务商报价”列表；注册服务商下拉改为“注册商 | 特征账号 | 价格/状态”，避免长账号占据主要空间。
 - **域名购买卡片操作布局**（`backend/app/api/v1/feishu.py`）：移除默认选择说明；批准并执行按钮单独一行，拒绝按钮在左、拒绝理由输入框在右同一行展示。
