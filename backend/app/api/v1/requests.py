@@ -12,6 +12,9 @@ from app.schemas.request import (
     RequestResponse, RequestListResponse, RequestStatsResponse
 )
 from app.models.user import User
+from app.models.domain import Domain, DnsAccount
+from app.models.system import SystemDefaults
+from app.models.request import Request
 
 
 def _get_specialist_scope_ids(db: Session, specialist_id: int) -> List[int]:
@@ -22,6 +25,45 @@ def _get_specialist_scope_ids(db: Session, specialist_id: int) -> List[int]:
     ids = [row.id for row in rows]
     ids.append(specialist_id)
     return ids
+
+
+def _can_use_dns_account(current_user: User, account: Optional[DnsAccount]) -> bool:
+    if not account or not account.is_active:
+        return False
+    if current_user.role == "super_admin":
+        return True
+    return account.owner_id == current_user.id
+
+
+def _infer_dns_account_for_request(db: Session, request, current_user: User) -> Optional[DnsAccount]:
+    """后台审批未显式选择 DNS 账号时，仅从本地数据推断账号，不遍历服务商。"""
+    if request.type != "dns_record":
+        return None
+
+    domain = db.query(Domain).filter(Domain.name == request.domain_name).first()
+    if domain and domain.dns_account_id:
+        account = db.query(DnsAccount).filter(DnsAccount.id == domain.dns_account_id).first()
+        if _can_use_dns_account(current_user, account):
+            return account
+
+    previous = db.query(Request).filter(
+        Request.type == "dns_record",
+        Request.domain_name == request.domain_name,
+        Request.selected_dns_account_id.isnot(None),
+        Request.status.in_(["approved", "completed"]),
+    ).order_by(Request.updated_at.desc(), Request.created_at.desc()).first()
+    if previous and previous.selected_dns_account_id:
+        account = db.query(DnsAccount).filter(DnsAccount.id == previous.selected_dns_account_id).first()
+        if _can_use_dns_account(current_user, account):
+            return account
+
+    defaults = db.query(SystemDefaults).filter(SystemDefaults.user_id == current_user.id).first()
+    if defaults and defaults.default_dns_account_id:
+        account = db.query(DnsAccount).filter(DnsAccount.id == defaults.default_dns_account_id).first()
+        if _can_use_dns_account(current_user, account):
+            return account
+
+    return None
 
 router = APIRouter(
     prefix="/requests",
@@ -272,6 +314,13 @@ def approve_request(
             if existing:
                 for key, value in override.items():
                     setattr(existing, key, value)
+                db.commit()
+        existing = service.get_request(request_id)
+        if existing and existing.type == "dns_record" and not existing.selected_dns_account_id:
+            account = _infer_dns_account_for_request(db, existing, current_user)
+            if account:
+                existing.selected_dns_account_id = account.id
+                existing.selected_dns_provider_code = account.provider_code
                 db.commit()
 
         request = service.approve_request(

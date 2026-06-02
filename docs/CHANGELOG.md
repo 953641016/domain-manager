@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **后台申请审批 DNS账号推断**（`backend/app/api/v1/requests.py`、`backend/app/services/execution_service.py`）：后台 `/requests` 页面批准 DNS 申请时，若未显式选择 DNS账号，会按本地域名绑定、同域名历史成功申请、当前用户默认 DNS账号自动补齐；DNS 执行成功后回填域名与 DNS账号绑定，避免后台审批执行时报“未配置DNS解析账号或解析商”。
 - **超管审批卡片超时**（`backend/app/api/v1/feishu.py`）：账号配置/用户管理等超管审批卡片点击授权或拒绝后先快速响应飞书，再后台执行写库与结果通知，避免卡片弹出 `200341` 超时错误。
 - **飞书卡片审批超时**（`backend/app/api/v1/feishu.py`）：文档按钮/DNS 审批卡片点击批准后先在 3 秒内返回交互响应，再由后台线程执行域名购买或 DNS 解析，避免执行已成功但飞书客户端弹出 `200341` 超时错误。
 - **域名列表与 DNS 账号表单**（`backend/app/api/v1/domains.py`、`backend/app/schemas/domain.py`、`frontend/src/pages/Domains/index.tsx`、`frontend/src/pages/Config.tsx`）：域名列表新增所属 DNS 账号展示；DNS账号新增/编辑表单按 Cloudflare/DNSPod 显示 Token、Account ID、Secret ID 等对应字段说明。

@@ -159,8 +159,11 @@ class ExecutionService:
 
         ok = sum(1 for x in results if x["status"] in ("success", "skipped"))
         total = len(results)
+        success = ok == total and total > 0
+        if success:
+            self._upsert_domain_dns_mapping(request, account, provider_code)
         return {
-            "success": ok == total and total > 0,
+            "success": success,
             "total": total,
             "success_count": ok,
             "failed_count": total - ok,
@@ -168,6 +171,29 @@ class ExecutionService:
             "dns_account_name": account.name,
             "provider_code": provider_code,
         }
+
+    def _upsert_domain_dns_mapping(self, request: Request, account, provider_code: str) -> None:
+        """DNS 执行成功后回填本地域名 → DNS账号映射，供后台审批自动匹配。"""
+        try:
+            from app.models.domain import Domain
+
+            domain = self.db.query(Domain).filter(Domain.name == request.domain_name).first()
+            if not domain:
+                domain = Domain(
+                    name=request.domain_name,
+                    status="active",
+                    owner_id=getattr(account, "owner_id", None) or request.requester_id,
+                )
+                self.db.add(domain)
+            domain.dns_provider_code = provider_code
+            domain.dns_account_id = account.id
+            if not domain.owner_id:
+                domain.owner_id = getattr(account, "owner_id", None) or request.requester_id
+            self.db.commit()
+        except Exception:
+            import logging
+            self.db.rollback()
+            logging.getLogger(__name__).warning("回填域名 DNS 账号映射失败: %s", request.domain_name)
 
     # ==================== 域名注册执行 ====================
 
