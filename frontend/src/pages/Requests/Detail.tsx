@@ -40,7 +40,6 @@ export default function RequestDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
-  const [showRejectModal, setShowRejectModal] = useState(false);
   const [regAccounts, setRegAccounts] = useState<AccountOption[]>([]);
   const [dnsAccounts, setDnsAccounts] = useState<AccountOption[]>([]);
   const [selectedRegAccountId, setSelectedRegAccountId] = useState('');
@@ -116,7 +115,6 @@ export default function RequestDetailPage() {
     try {
       setActionLoading(true);
       await api.post(`/requests/${request.id}/reject`, { reason: rejectReason.trim() || null });
-      setShowRejectModal(false);
       fetchRequest();
     } catch (err: any) {
       console.error('拒绝失败:', err);
@@ -335,61 +333,34 @@ export default function RequestDetailPage() {
                   )}
                 </div>
               )}
-              <div className="flex space-x-4">
-              <button
-                onClick={handleApprove}
-                disabled={actionLoading}
-                className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
-              >
-                通过
-              </button>
-              <button
-                onClick={() => setShowRejectModal(true)}
-                disabled={actionLoading}
-                className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
-              >
-                拒绝
-              </button>
+              <div className="space-y-3">
+                <button
+                  onClick={handleApprove}
+                  disabled={actionLoading}
+                  className="px-6 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50"
+                >
+                  通过
+                </button>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <button
+                    onClick={handleReject}
+                    disabled={actionLoading}
+                    className="px-6 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 sm:flex-none"
+                  >
+                    拒绝
+                  </button>
+                  <input
+                    value={rejectReason}
+                    onChange={(e) => setRejectReason(e.target.value)}
+                    className="w-full sm:max-w-xl px-3 py-2 border border-gray-300 rounded-md"
+                    placeholder="拒绝理由（可选）"
+                  />
+                </div>
               </div>
             </div>
           </div>
         )}
       </div>
-
-      {showRejectModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">拒绝申请</h3>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                拒绝原因
-              </label>
-              <textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                rows={4}
-                className="w-full px-4 py-2 border border-gray-300 rounded-md"
-                placeholder="请输入拒绝原因..."
-              />
-            </div>
-            <div className="flex space-x-4">
-              <button
-                onClick={handleReject}
-                disabled={actionLoading}
-                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
-              >
-                确认拒绝
-              </button>
-              <button
-                onClick={() => setShowRejectModal(false)}
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300"
-              >
-                取消
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

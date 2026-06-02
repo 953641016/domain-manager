@@ -22,6 +22,7 @@
 
 ### 修复
 - **申请失败/拒绝日志可见**（`backend/app/services/execution_service.py`、`backend/app/schemas/request.py`、`frontend/src/pages/Requests/Detail.tsx`）：执行失败时从 DNS 单条记录中提取失败摘要写入申请与审计日志，后台申请详情展示失败日志和执行明细；后台拒绝申请的拒绝理由改为可选，填写后继续记录到申请详情。
+- **后台拒绝理由入口**（`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批区域直接展示“拒绝理由（可选）”输入框，拒绝按钮与输入框同屏显示，不再隐藏到弹窗中。
 - **后台申请审批 DNS账号推断**（`backend/app/api/v1/requests.py`、`backend/app/services/execution_service.py`）：后台 `/requests` 页面批准 DNS 申请时，若未显式选择 DNS账号，会按本地域名绑定、同域名历史成功申请、当前用户默认 DNS账号自动补齐；DNS 执行成功后回填域名与 DNS账号绑定，避免后台审批执行时报“未配置DNS解析账号或解析商”。
 - **超管审批卡片超时**（`backend/app/api/v1/feishu.py`）：账号配置/用户管理等超管审批卡片点击授权或拒绝后先快速响应飞书，再后台执行写库与结果通知，避免卡片弹出 `200341` 超时错误。
 - **飞书卡片审批超时**（`backend/app/api/v1/feishu.py`）：文档按钮/DNS 审批卡片点击批准后先在 3 秒内返回交互响应，再由后台线程执行域名购买或 DNS 解析，避免执行已成功但飞书客户端弹出 `200341` 超时错误。
