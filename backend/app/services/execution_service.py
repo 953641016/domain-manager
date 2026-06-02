@@ -314,11 +314,13 @@ class ExecutionService:
                     f"**处理时间**：{processed_time}"
                 )
             else:
+                failure_reason = self._summarize_failure(result)
                 title = f"❌ 您的{type_label}申请未能完成"
                 color = "red"
                 body = (
                     f"**域名**：{request.domain_name}\n"
                     f"**处理时间**：{processed_time}\n"
+                    f"**失败原因**：{failure_reason}\n"
                     "请联系域名专员了解详情并重新提交。"
                 )
             self._send_card(requester, title, color, body)
@@ -359,7 +361,7 @@ class ExecutionService:
                 if result.get("order_id"):
                     lines.append(f"**订单号**：{result['order_id']}")
             else:
-                lines.append(f"**失败原因**：{result.get('error') or result.get('message') or '未知错误'}")
+                lines.append(f"**失败原因**：{self._summarize_failure(result)}")
         else:  # dns_record
             if result.get("dns_account_name"):
                 lines.append(f"**解析账号**：{result['dns_account_name']}")
