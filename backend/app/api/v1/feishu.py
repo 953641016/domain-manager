@@ -676,19 +676,6 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         "columns": [
                             {
                                 "tag": "column",
-                                "width": "weighted",
-                                "weight": 2,
-                                "vertical_align": "top",
-                                "elements": [
-                                    {
-                                        "tag": "input",
-                                        "name": "reject_reason",
-                                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
-                                    },
-                                ],
-                            },
-                            {
-                                "tag": "column",
                                 "width": "auto",
                                 "vertical_align": "top",
                                 "elements": [
@@ -699,6 +686,18 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                                         "text": {"tag": "plain_text", "content": "❌ 拒绝"},
                                         "type": "danger",
                                         "value": {"action": "reject_doc_request", "request_id": req.id},
+                                    },
+                                ],
+                            },
+                            {
+                                "tag": "column",
+                                "width": "auto",
+                                "vertical_align": "top",
+                                "elements": [
+                                    {
+                                        "tag": "input",
+                                        "name": "reject_reason",
+                                        "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
                                     },
                                 ],
                             },
