@@ -1400,6 +1400,30 @@ def _as_text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _execute_request_in_background(request_id: str, label: str) -> None:
+    """飞书卡片回调需 3 秒内响应，耗时执行放到后台处理。"""
+    import logging
+    import threading
+
+    def runner() -> None:
+        db = SessionLocal()
+        try:
+            from app.services.request_service import RequestService
+            from app.services.execution_service import ExecutionService
+
+            req = RequestService(db).get_request(request_id)
+            if not req:
+                logging.getLogger(__name__).warning("%s 后台执行跳过：申请不存在 %s", label, request_id)
+                return
+            ExecutionService(db).execute_and_notify(req)
+        except Exception:
+            logging.getLogger(__name__).exception("%s 后台执行失败: %s", label, request_id)
+        finally:
+            db.close()
+
+    threading.Thread(target=runner, name=f"feishu-{label}-{request_id[:8]}", daemon=True).start()
+
+
 async def _handle_doc_request_card_action(card_action: str, value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
     """处理新版文档按钮申请审批卡片。"""
     import logging
@@ -1414,7 +1438,6 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
     try:
         from app.services.user_service import UserService
         from app.services.request_service import RequestService
-        from app.services.execution_service import ExecutionService
         from app.models.domain import RegAccount, DnsAccount
 
         user_svc = UserService(db)
@@ -1474,10 +1497,7 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
         db.refresh(req)
 
         req_svc.approve_request(request_id, reviewer.id, reviewer.name)
-        try:
-            ExecutionService(db).execute_and_notify(req)
-        except Exception as e:
-            logger.exception("文档按钮申请执行失败: %s", e)
+        _execute_request_in_background(request_id, "doc-request")
         return {"toast": {"type": "success", "content": "已批准，正在执行"}}
     except Exception as e:
         logger.exception("处理文档按钮审批卡片失败")
@@ -1547,7 +1567,6 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict,
     try:
         from app.services.user_service import UserService
         from app.services.request_service import RequestService
-        from app.services.execution_service import ExecutionService
 
         user_svc = UserService(db)
         req_svc  = RequestService(db)
@@ -1569,11 +1588,7 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict,
 
         if card_action == "approve_dns_request":
             req_svc.approve_request(request_id, specialist.id, specialist.name)
-            # 自动执行
-            try:
-                ExecutionService(db).execute_and_notify(request)
-            except Exception as e:
-                logger.exception("DNS 申请执行失败: %s", e)
+            _execute_request_in_background(request_id, "dns-request")
             return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
         else:
             reason = _as_text((form_values or {}).get("reject_reason")) or "专员拒绝"
