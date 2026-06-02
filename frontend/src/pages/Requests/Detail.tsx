@@ -17,6 +17,18 @@ interface RequestDetail {
   reject_reason?: string;
   approver_name?: string;
   request_data?: any;
+  selected_registrar_code?: string | null;
+  selected_reg_account_id?: number | null;
+  selected_dns_provider_code?: string | null;
+  selected_dns_account_id?: number | null;
+}
+
+interface AccountOption {
+  id: number;
+  name: string;
+  registrar_code?: string;
+  provider_code?: string;
+  owner_name?: string | null;
 }
 
 export default function RequestDetailPage() {
@@ -27,10 +39,15 @@ export default function RequestDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [regAccounts, setRegAccounts] = useState<AccountOption[]>([]);
+  const [dnsAccounts, setDnsAccounts] = useState<AccountOption[]>([]);
+  const [selectedRegAccountId, setSelectedRegAccountId] = useState('');
+  const [selectedDnsAccountId, setSelectedDnsAccountId] = useState('');
 
   useEffect(() => {
     if (id) {
       fetchRequest();
+      fetchAccounts();
     }
   }, [id]);
 
@@ -39,10 +56,29 @@ export default function RequestDetailPage() {
       setLoading(true);
       const response = await api.get(`/requests/${id}`);
       setRequest(response.data);
+      if (response.data?.selected_reg_account_id) {
+        setSelectedRegAccountId(String(response.data.selected_reg_account_id));
+      }
+      if (response.data?.selected_dns_account_id) {
+        setSelectedDnsAccountId(String(response.data.selected_dns_account_id));
+      }
     } catch (err) {
       console.error('获取申请详情失败:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAccounts = async () => {
+    try {
+      const [regRes, dnsRes] = await Promise.all([
+        api.get('/domains/accounts/reg/list'),
+        api.get('/domains/accounts/dns/list'),
+      ]);
+      setRegAccounts(regRes.data?.items || []);
+      setDnsAccounts(dnsRes.data?.items || []);
+    } catch (err) {
+      console.error('获取账号列表失败:', err);
     }
   };
 
@@ -51,7 +87,18 @@ export default function RequestDetailPage() {
     
     try {
       setActionLoading(true);
-      await api.post(`/requests/${request.id}/approve`);
+      const payload: Record<string, any> = {};
+      if (request.type === 'domain_register' && selectedRegAccountId) {
+        const account = regAccounts.find((item) => item.id === Number(selectedRegAccountId));
+        payload.selected_reg_account_id = Number(selectedRegAccountId);
+        payload.selected_registrar_code = account?.registrar_code;
+      }
+      if (request.type === 'dns_record' && selectedDnsAccountId) {
+        const account = dnsAccounts.find((item) => item.id === Number(selectedDnsAccountId));
+        payload.selected_dns_account_id = Number(selectedDnsAccountId);
+        payload.selected_dns_provider_code = account?.provider_code;
+      }
+      await api.post(`/requests/${request.id}/approve`, payload);
       fetchRequest();
     } catch (err: any) {
       console.error('审批失败:', err);
@@ -97,6 +144,9 @@ export default function RequestDetailPage() {
       </span>
     );
   };
+
+  const selectedRegAccount = regAccounts.find((item) => item.id === Number(selectedRegAccountId));
+  const selectedDnsAccount = dnsAccounts.find((item) => item.id === Number(selectedDnsAccountId));
 
   if (loading) {
     return (
@@ -188,7 +238,52 @@ export default function RequestDetailPage() {
 
         {request.status === 'pending' && (
           <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
-            <div className="flex space-x-4">
+            <div className="space-y-4">
+              {request.type === 'domain_register' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">注册账号</label>
+                  <select
+                    value={selectedRegAccountId}
+                    onChange={(e) => setSelectedRegAccountId(e.target.value)}
+                    className="w-full md:w-96 px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  >
+                    <option value="">不指定，后端自动判断</option>
+                    {regAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}（{account.registrar_code}）
+                      </option>
+                    ))}
+                  </select>
+                  {selectedRegAccount && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      已选：{selectedRegAccount.name} / {selectedRegAccount.registrar_code}
+                    </p>
+                  )}
+                </div>
+              )}
+              {request.type === 'dns_record' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">DNS账号</label>
+                  <select
+                    value={selectedDnsAccountId}
+                    onChange={(e) => setSelectedDnsAccountId(e.target.value)}
+                    className="w-full md:w-96 px-3 py-2 border border-gray-300 rounded-md bg-white"
+                  >
+                    <option value="">不指定，后端按域名自动匹配</option>
+                    {dnsAccounts.map((account) => (
+                      <option key={account.id} value={account.id}>
+                        {account.name}（{account.provider_code}）
+                      </option>
+                    ))}
+                  </select>
+                  {selectedDnsAccount && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      已选：{selectedDnsAccount.name} / {selectedDnsAccount.provider_code}
+                    </p>
+                  )}
+                </div>
+              )}
+              <div className="flex space-x-4">
               <button
                 onClick={handleApprove}
                 disabled={actionLoading}
@@ -203,6 +298,7 @@ export default function RequestDetailPage() {
               >
                 拒绝
               </button>
+              </div>
             </div>
           </div>
         )}
