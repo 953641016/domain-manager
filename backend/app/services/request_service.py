@@ -131,7 +131,7 @@ class RequestService:
         self.db.refresh(request)
         return request
 
-    def reject_request(self, request_id: str, approver_id: int, approver_name: str, reason: str) -> Optional[Request]:
+    def reject_request(self, request_id: str, approver_id: int, approver_name: str, reason: Optional[str] = None) -> Optional[Request]:
         """拒绝申请"""
         request = self.get_request(request_id)
         if not request:
@@ -144,7 +144,7 @@ class RequestService:
         request.approver_id = approver_id
         request.approver_name = approver_name
         request.approved_at = datetime.now()
-        request.reject_reason = reason
+        request.reject_reason = reason.strip() if isinstance(reason, str) and reason.strip() else None
 
         self.db.commit()
         self.db.refresh(request)

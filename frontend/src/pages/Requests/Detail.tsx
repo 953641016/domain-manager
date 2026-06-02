@@ -15,6 +15,8 @@ interface RequestDetail {
   created_at: string;
   approved_at?: string;
   reject_reason?: string;
+  error_message?: string | null;
+  execution_result?: any;
   approver_name?: string;
   request_data?: any;
   selected_registrar_code?: string | null;
@@ -109,11 +111,11 @@ export default function RequestDetailPage() {
   };
 
   const handleReject = async () => {
-    if (!request || !rejectReason) return;
+    if (!request) return;
     
     try {
       setActionLoading(true);
-      await api.post(`/requests/${request.id}/reject`, { reason: rejectReason });
+      await api.post(`/requests/${request.id}/reject`, { reason: rejectReason.trim() || null });
       setShowRejectModal(false);
       fetchRequest();
     } catch (err: any) {
@@ -147,6 +149,47 @@ export default function RequestDetailPage() {
 
   const selectedRegAccount = regAccounts.find((item) => item.id === Number(selectedRegAccountId));
   const selectedDnsAccount = dnsAccounts.find((item) => item.id === Number(selectedDnsAccountId));
+
+  const renderExecutionResult = () => {
+    const result = request?.execution_result;
+    if (!result) return null;
+
+    const records = Array.isArray(result.records) ? result.records : [];
+    if (records.length > 0) {
+      return (
+        <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
+          <label className="text-sm text-gray-700 font-medium">执行明细</label>
+          <div className="mt-2 space-y-2 text-sm">
+            {records.map((item: any, index: number) => {
+              const record = item.record || {};
+              const success = item.status === 'success' || item.status === 'skipped';
+              const host = record.host || record.name || record.hostname || '@';
+              const value = record.value || record.content || record.target || '-';
+              return (
+                <div
+                  key={`${host}-${record.type || record.record_type}-${index}`}
+                  className={success ? 'text-green-700' : 'text-red-700'}
+                >
+                  <span className="font-medium">{success ? '✓' : '✗'} {record.type || record.record_type || '-'} {host}</span>
+                  <span className="text-gray-600"> → {value}</span>
+                  {item.message && <span>：{item.message}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-4 bg-gray-50 border border-gray-200 rounded-md">
+        <label className="text-sm text-gray-700 font-medium">执行结果</label>
+        <pre className="mt-2 text-sm overflow-x-auto whitespace-pre-wrap">
+          {JSON.stringify(result, null, 2)}
+        </pre>
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -223,6 +266,15 @@ export default function RequestDetailPage() {
               <p className="text-red-600">{request.reject_reason}</p>
             </div>
           )}
+
+          {request.error_message && (
+            <div className="p-4 bg-orange-50 border border-orange-200 rounded-md">
+              <label className="text-sm text-orange-700 font-medium">失败日志</label>
+              <p className="text-orange-700">{request.error_message}</p>
+            </div>
+          )}
+
+          {renderExecutionResult()}
 
           {request.request_data && (
             <div>
@@ -323,7 +375,7 @@ export default function RequestDetailPage() {
             <div className="flex space-x-4">
               <button
                 onClick={handleReject}
-                disabled={!rejectReason || actionLoading}
+                disabled={actionLoading}
                 className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
               >
                 确认拒绝

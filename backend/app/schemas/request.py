@@ -42,7 +42,7 @@ class RequestApprove(BaseModel):
 
 class RequestReject(BaseModel):
     """申请拒绝请求"""
-    reason: str = Field(..., description="拒绝原因")
+    reason: Optional[str] = Field(None, description="拒绝原因")
 
 
 class RequestResponse(BaseModel):

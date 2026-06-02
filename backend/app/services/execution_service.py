@@ -57,9 +57,12 @@ class ExecutionService:
 
         # 更新申请状态
         success = bool(result.get("success"))
+        error_message = None if success else self._summarize_failure(result)
+        if error_message and not result.get("error"):
+            result["error"] = error_message
         request.status = "completed" if success else "failed"
         request.execution_result = result
-        request.error_message = None if success else (result.get("error") or result.get("message"))
+        request.error_message = error_message
         try:
             self.db.commit()
             self.db.refresh(request)
@@ -162,6 +165,7 @@ class ExecutionService:
         success = ok == total and total > 0
         if success:
             self._upsert_domain_dns_mapping(request, account, provider_code)
+        failure_message = None if success else self._summarize_failure({"records": results})
         return {
             "success": success,
             "total": total,
@@ -170,6 +174,7 @@ class ExecutionService:
             "records": results,
             "dns_account_name": account.name,
             "provider_code": provider_code,
+            **({"error": failure_message} if failure_message else {}),
         }
 
     def _upsert_domain_dns_mapping(self, request: Request, account, provider_code: str) -> None:
@@ -439,10 +444,36 @@ class ExecutionService:
                 user_name=request.approver_name,
                 after_state=result if isinstance(result, dict) else None,
                 status="success" if result.get("success") else "failed",
-                error_message=None if result.get("success") else (result.get("error") or result.get("message")),
+                error_message=None if result.get("success") else self._summarize_failure(result),
             )
         except Exception:
             logger.exception("写入执行审计日志失败")
+
+    @staticmethod
+    def _summarize_failure(result: Dict[str, Any]) -> str:
+        """从执行结果中提取适合列表/详情页展示的失败摘要。"""
+        if result.get("error"):
+            return str(result["error"])
+        if result.get("message"):
+            return str(result["message"])
+
+        failed_records = []
+        for item in result.get("records") or []:
+            if item.get("status") not in ("failed", "error"):
+                continue
+            rec = item.get("record") or {}
+            record_type = rec.get("type") or rec.get("record_type") or ""
+            host = rec.get("host") or rec.get("name") or rec.get("hostname") or "@"
+            message = item.get("message") or "执行失败"
+            failed_records.append(f"{record_type} {host}: {message}".strip())
+
+        if failed_records:
+            summary = "；".join(failed_records[:3])
+            if len(failed_records) > 3:
+                summary += f"；另有 {len(failed_records) - 3} 条失败"
+            return summary
+
+        return "执行失败"
 
     @staticmethod
     def _normalize_records(request_data: Any) -> List[Dict[str, Any]]:
