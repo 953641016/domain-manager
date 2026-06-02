@@ -562,16 +562,26 @@ def _reg_account_options_with_prices(accounts: List[Any], quotes: Dict[str, Dict
         quote = quotes.get(str(account.id))
         price_text = _format_price_quote(quote)
         options.append({
-            "text": {"tag": "plain_text", "content": f"{account.name}（{account.registrar_code}，预估价：{price_text}）"},
+            "text": {"tag": "plain_text", "content": f"{price_text} | {account.registrar_code} | {account.name}"},
             "value": str(account.id),
         })
     return options
+
+
+def _reg_price_quote_lines(accounts: List[Any], quotes: Dict[str, Dict[str, Any]]) -> str:
+    lines = []
+    for account in accounts:
+        quote = quotes.get(str(account.id))
+        price_text = _format_price_quote(quote)
+        lines.append(f"- **{account.name}**（{account.registrar_code}）：{price_text}")
+    return "\n".join(lines) or "暂无可用注册服务商报价"
 
 
 def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: List[Any]) -> Dict[str, Any]:
     data = req.request_data or {}
     quotes = data.get("price_quotes") or {}
     account_options = _reg_account_options_with_prices(accounts, quotes)
+    price_quote_lines = _reg_price_quote_lines(accounts, quotes)
     default_account_id = str(data.get("default_reg_account_id") or (accounts[0].id if accounts else ""))
     initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
     initial_option_text = initial_option.get("text", {}).get("content") or ""
@@ -592,8 +602,16 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         f"**申请时间**：{_format_card_time(req.created_at)}\n"
                         f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
                         f"**注册服务商**：请在下方选择\n"
-                        f"**预估价格**：随注册服务商选项展示，最终以审批执行时重新查价为准"
+                        f"**预估价格**：见下方服务商报价，最终以审批执行时重新查价为准"
                     ),
+                },
+            },
+            {"tag": "hr"},
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": f"**服务商报价**\n{price_quote_lines}",
                 },
             },
             {
