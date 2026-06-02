@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **用户管理卡片专员显示**（`backend/app/services/user_confirmation_service.py`）：用户管理授权申请、审批结果、目标用户变更通知中的“归属专员”由数字 ID 改为专员姓名显示。
 - **卡片样式一致性**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_service.py`、`backend/app/services/user_confirmation_service.py`）：DNS 文档审批、旧版 DNS 审批、超管确认卡片统一为“批准单独一行、拒绝按钮在左、拒绝理由输入框在右”的表单布局；超管结果卡片补充处理时间。
 - **审批结果通知卡片化**（`backend/app/api/v1/feishu.py`、`backend/app/services/execution_service.py`）：文档按钮申请拒绝、通过完成、执行失败通知改为飞书卡片展示，并统一显示处理时间。
 - **飞书审批卡片表单渲染**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_confirmation_service.py`）：按飞书 JSON 1.0 表单容器规范，将注册服务商/DNS账号下拉、拒绝理由输入框与提交按钮放入 `form`，并修正 `select_static.initial_option` 为文本值，避免控件被过滤或卡片 JSON 解析失败。

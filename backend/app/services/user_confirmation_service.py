@@ -715,6 +715,8 @@ class UserOperationConfirmationService:
                 label = _USER_FIELD_LABELS.get(k, k)
                 if k == "role":
                     display_v = self._role_name(v)
+                elif k == "assigned_specialist_id":
+                    display_v = self._specialist_name(v)
                 elif k == "is_active":
                     display_v = "启用" if v else "禁用"
                 else:
@@ -879,6 +881,8 @@ class UserOperationConfirmationService:
                         label = _USER_FIELD_LABELS.get(k, k)
                         if k == "role":
                             display_v = self._role_name(v)
+                        elif k == "assigned_specialist_id":
+                            display_v = self._specialist_name(v)
                         elif k == "is_active":
                             display_v = "启用" if v else "禁用"
                         else:
@@ -1023,6 +1027,17 @@ class UserOperationConfirmationService:
             return "未指定"
         return ROLE_PERMISSIONS.get(role, {}).get("name", role)
 
+    def _specialist_name(self, specialist_id) -> str:
+        if specialist_id is None or specialist_id == "":
+            return "未指定"
+        try:
+            user = self.db.query(User).filter(User.id == int(specialist_id)).first()
+            if user:
+                return user.name
+        except Exception:
+            pass
+        return str(specialist_id)
+
     @staticmethod
     def _format_dt(value) -> str:
         if not value:
@@ -1145,7 +1160,7 @@ class UserOperationConfirmationService:
             if changes.get("department"):
                 parts.append(f"部门→{changes['department']}")
             if changes.get("assigned_specialist_id"):
-                parts.append(f"归属专员ID→{changes['assigned_specialist_id']}")
+                parts.append(f"归属专员→{self._specialist_name(changes['assigned_specialist_id'])}")
             if "is_active" in changes and changes["is_active"] is not None:
                 parts.append(f"状态→{'启用' if changes['is_active'] else '禁用'}")
             # 超管转让：简化描述，不展开 changes 细节
