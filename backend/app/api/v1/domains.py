@@ -234,7 +234,7 @@ def create_reg_account(
     return _make_confirmation(
         db, current_user,
         ConfirmationOperationType.ADD_REG_ACCOUNT,
-        details={"data": payload, "owner_id": owner_id},
+        details={"data": payload, "owner_id": owner_id, "set_as_default": data.set_as_default},
         api_key_masked=masked,
     )
 

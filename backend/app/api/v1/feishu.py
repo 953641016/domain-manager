@@ -350,6 +350,11 @@ def submit_doc_button_request(
         accounts = _get_reviewable_reg_accounts(db, specialist)
         if not accounts:
             raise HTTPException(status_code=400, detail="归属域名专员没有可用注册账号")
+        request_data["price_quotes"] = _quote_reg_account_prices(db, parsed.domain, accounts)
+        default_account = _pick_default_reg_account(db, specialist, accounts)
+        if default_account:
+            request_data["default_reg_account_id"] = default_account.id
+            request_data["default_registrar_code"] = default_account.registrar_code
     else:
         accounts = _get_reviewable_dns_accounts(db, specialist)
         if not accounts:
@@ -410,6 +415,16 @@ def _get_reviewable_dns_accounts(db: Session, reviewer) -> List[Any]:
     return query.order_by(DnsAccount.name.asc()).all()
 
 
+def _pick_default_reg_account(db: Session, reviewer, accounts: List[Any]):
+    from app.models.system import SystemDefaults
+
+    account_map = {account.id: account for account in accounts}
+    defaults = db.query(SystemDefaults).filter(SystemDefaults.user_id == reviewer.id).first()
+    if defaults and defaults.default_reg_account_id in account_map:
+        return account_map[defaults.default_reg_account_id]
+    return accounts[0] if accounts else None
+
+
 def _select_options(accounts: List[Any], code_attr: str) -> List[Dict[str, Any]]:
     return [
         {
@@ -420,9 +435,87 @@ def _select_options(accounts: List[Any], code_attr: str) -> List[Dict[str, Any]]
     ]
 
 
+def _format_price_quote(quote: Optional[Dict[str, Any]]) -> str:
+    if not quote:
+        return "价格获取失败"
+    if not quote.get("check_successful"):
+        return quote.get("message") or "价格获取失败"
+    if quote.get("available") is False:
+        return quote.get("message") or "不可注册"
+    price = quote.get("price")
+    currency = quote.get("currency") or "USD"
+    if price is None:
+        return "可注册，价格未返回"
+    return f"{price} {currency}"
+
+
+def _quote_reg_account_prices(db: Session, domain: str, accounts: List[Any]) -> Dict[str, Dict[str, Any]]:
+    from app.services.domain_service import DomainService
+    from app.adapters.registrar_factory import RegistrarFactory
+
+    domain_svc = DomainService(db)
+    quotes: Dict[str, Dict[str, Any]] = {}
+    for account in accounts:
+        try:
+            decrypted = domain_svc.get_reg_account_decrypted(account.id)
+            if not decrypted or not decrypted.api_key:
+                raise ValueError("账号未配置 API 凭据")
+            account_id = decrypted.api_secret if decrypted.registrar_code == "cloudflare" else None
+            adapter = RegistrarFactory.create_registrar(
+                decrypted.registrar_code,
+                decrypted.api_key,
+                decrypted.api_secret,
+                account_id=account_id,
+            )
+            quote = adapter.check_domain_availability(domain) or {}
+            quotes[str(account.id)] = {
+                "account_id": account.id,
+                "account_name": account.name,
+                "registrar_code": account.registrar_code,
+                "available": quote.get("available"),
+                "price": quote.get("price"),
+                "currency": quote.get("currency"),
+                "message": quote.get("message"),
+                "tier": quote.get("tier"),
+                "check_successful": bool(quote.get("check_successful")),
+            }
+        except Exception as e:
+            quotes[str(account.id)] = {
+                "account_id": account.id,
+                "account_name": account.name,
+                "registrar_code": account.registrar_code,
+                "available": None,
+                "price": None,
+                "currency": None,
+                "message": f"价格获取失败: {str(e)}",
+                "check_successful": False,
+            }
+    return quotes
+
+
+def _reg_account_options_with_prices(accounts: List[Any], quotes: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    options = []
+    for account in accounts:
+        quote = quotes.get(str(account.id))
+        price_text = _format_price_quote(quote)
+        options.append({
+            "text": {"tag": "plain_text", "content": f"{account.name}（{account.registrar_code}｜{price_text}）"},
+            "value": str(account.id),
+        })
+    return options
+
+
 def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: List[Any]) -> Dict[str, Any]:
     data = req.request_data or {}
-    account_options = _select_options(accounts, "registrar_code")
+    quotes = data.get("price_quotes") or {}
+    account_options = _reg_account_options_with_prices(accounts, quotes)
+    default_account_id = str(data.get("default_reg_account_id") or (accounts[0].id if accounts else ""))
+    initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
+    default_quote = quotes.get(default_account_id) or {}
+    quote_lines = "\n".join(
+        f"• {account.name}（{account.registrar_code}）：{_format_price_quote(quotes.get(str(account.id)))}"
+        for account in accounts
+    )
     return {
         "config": {"wide_screen_mode": True},
         "header": {
@@ -438,14 +531,16 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         f"**域名**：{req.domain_name}\n"
                         f"**申请人**：{applicant.name}\n"
                         f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
-                        "**预估价格**：以注册商返回为准"
+                        f"**默认注册服务商**：{initial_option['text']['content']}\n"
+                        f"**默认预估价格**：{_format_price_quote(default_quote)}"
                     ),
                 },
             },
+            {"tag": "div", "text": {"tag": "lark_md", "content": f"**服务商报价**：\n{quote_lines or '暂无报价'}"}},
             {
                 "tag": "select_static",
                 "placeholder": {"tag": "plain_text", "content": "选择注册厂商账号"},
-                "initial_option": account_options[0],
+                "initial_option": initial_option,
                 "options": account_options,
                 "name": "selected_reg_account_id",
             },
@@ -1182,10 +1277,15 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
             account = db.query(RegAccount).filter(RegAccount.id == account_id, RegAccount.is_active == True).first()  # noqa: E712
             if not account or (reviewer.role != "super_admin" and account.owner_id != reviewer.id):
                 return {"toast": {"type": "error", "content": "无权使用该注册账号"}}
+            selected_quotes = _quote_reg_account_prices(db, req.domain_name, [account])
+            selected_quote = selected_quotes.get(str(account.id)) or {}
+            if selected_quote.get("check_successful") and selected_quote.get("available") is False:
+                return {"toast": {"type": "error", "content": f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}"}}
             req.selected_reg_account_id = account.id
             req.selected_registrar_code = account.registrar_code
             request_data = dict(req.request_data or {})
             request_data["register_years"] = _as_text(form_values.get("register_years")) or "1"
+            request_data["selected_price_quote"] = selected_quote
             req.request_data = request_data
         else:
             account_id = _as_int(form_values.get("selected_dns_account_id"))

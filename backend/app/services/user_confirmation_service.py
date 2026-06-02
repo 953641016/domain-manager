@@ -410,7 +410,15 @@ class UserOperationConfirmationService:
         # 账号操作：写库时 domain_service 会自动加密 API Key
         if op == ConfirmationOperationType.ADD_REG_ACCOUNT:
             data = RegAccountCreate(**details["data"])
-            domain_svc.create_reg_account(data, owner_id=details.get("owner_id"))
+            account = domain_svc.create_reg_account(data, owner_id=details.get("owner_id"))
+            if details.get("set_as_default"):
+                self._set_user_defaults(
+                    details.get("owner_id"),
+                    {
+                        "default_registrar": account.registrar_code,
+                        "default_reg_account_id": account.id,
+                    },
+                )
 
         elif op == ConfirmationOperationType.UPDATE_REG_ACCOUNT:
             data = RegAccountUpdate(**details["data"])
@@ -436,6 +444,33 @@ class UserOperationConfirmationService:
             self._execute_provider_op("update", details)
         elif op == ConfirmationOperationType.DELETE_PROVIDER:
             self._execute_provider_op("delete", details)
+
+        elif op == ConfirmationOperationType.SET_DEFAULT_CONFIG:
+            if details.get("type") == "set_user_defaults":
+                self._set_user_defaults(
+                    details.get("target_user_id"),
+                    details.get("changes") or {},
+                )
+
+    def _set_user_defaults(self, user_id: Optional[int], changes: dict) -> None:
+        """写入某个用户的默认配置（由超管确认通过后调用）。"""
+        if not user_id:
+            return
+        from app.models.system import SystemDefaults
+
+        row = self.db.query(SystemDefaults).filter(SystemDefaults.user_id == user_id).first()
+        if not row:
+            row = SystemDefaults(user_id=user_id)
+            self.db.add(row)
+        for key in (
+            "default_registrar",
+            "default_dns_provider",
+            "default_reg_account_id",
+            "default_dns_account_id",
+        ):
+            if key in changes:
+                setattr(row, key, changes.get(key))
+        self.db.commit()
 
     def _execute_provider_op(self, action: str, details: dict) -> None:
         """执行服务商增改删"""

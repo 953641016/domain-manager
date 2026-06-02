@@ -130,6 +130,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const [regForm, setRegForm] = useState({
     name: '', registrar_code: '', api_key: '', api_secret: '', remark: '',
     target_owner_id: '' as string | number,  // super_admin 新建时指定归属
+    set_as_default: false,
   });
 
   // ========== DNS 账号 ==========
@@ -184,7 +185,10 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   useEffect(() => { fetchConfigInfo(); }, []);
 
   useEffect(() => {
-    if (activeTab === 'reg-accounts') loadRegAccounts();
+    if (activeTab === 'reg-accounts') {
+      loadRegAccounts();
+      loadDefaults();
+    }
     if (activeTab === 'dns-accounts') loadDnsAccounts();
     if (activeTab === 'defaults') {
       loadDefaults();
@@ -252,12 +256,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
         api_secret: '',
         remark: account.remark || '',
         target_owner_id: account.owner_id ?? '',
+        set_as_default: isDefaultRegAccount(account),
       });
     } else {
       setEditingRegAccount(null);
       setRegForm({
         name: '', registrar_code: '', api_key: '', api_secret: '', remark: '',
         target_owner_id: isSuperAdmin ? currentUser.id : '',
+        set_as_default: false,
       });
     }
     setShowRegModal(true);
@@ -266,7 +272,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const closeRegModal = () => {
     setShowRegModal(false);
     setEditingRegAccount(null);
-    setRegForm({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '', target_owner_id: '' });
+    setRegForm({ name: '', registrar_code: '', api_key: '', api_secret: '', remark: '', target_owner_id: '', set_as_default: false });
   };
 
   const handleRegSave = async () => {
@@ -283,6 +289,9 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
           api_secret: regForm.api_secret || undefined,
           remark: regForm.remark || undefined,
         });
+        if (regForm.set_as_default) {
+          await handleSetDefaultRegAccount(editingRegAccount, false);
+        }
       } else {
         const body: Record<string, any> = {
           name: regForm.name,
@@ -290,6 +299,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
           api_key: regForm.api_key || undefined,
           api_secret: regForm.api_secret || undefined,
           remark: regForm.remark || undefined,
+          set_as_default: regForm.set_as_default,
         };
         if (isSuperAdmin && regForm.target_owner_id) {
           body.target_owner_id = Number(regForm.target_owner_id);
@@ -600,9 +610,74 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   const findRegistrarName = (code: string) => registrars.find((r) => r.code === code)?.name ?? code;
   const findDnsProviderName = (code: string) => dnsProviders.find((d) => d.code === code)?.name ?? code;
 
+  const isDefaultRegAccount = (account: RegAccount) => {
+    if (isSuperAdmin) {
+      return allDefaults.some((item) =>
+        item.user_id === account.owner_id && item.default_reg_account_id === account.id
+      );
+    }
+    return defaultConfig.default_reg_account_id === account.id;
+  };
+
+  const getDefaultOwnerNames = (account: RegAccount) => {
+    if (isSuperAdmin) {
+      return allDefaults
+        .filter((item) => item.default_reg_account_id === account.id)
+        .map((item) => item.user_name);
+    }
+    return isDefaultRegAccount(account) ? [currentUser.name] : [];
+  };
+
+  const handleSetDefaultRegAccount = async (account: RegAccount, showAlert = true) => {
+    const targetOwnerId = account.owner_id ?? currentUser.id;
+    const payload = {
+      default_registrar: account.registrar_code,
+      default_reg_account_id: account.id,
+    };
+    try {
+      const res = isSuperAdmin && targetOwnerId !== currentUser.id
+        ? await api.put(`/config/defaults/${targetOwnerId}`, payload)
+        : await api.put('/config/defaults', payload);
+      if (showAlert) alert(res.data?.message || '已提交超管确认申请，审批通过后生效');
+      loadDefaults();
+    } catch (err: any) {
+      alert('设置默认失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const getRegCredentialLabels = (registrarCode: string) => {
+    if (registrarCode === 'cloudflare') {
+      return {
+        keyLabel: 'API Token',
+        keyPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 Cloudflare API Token',
+        secretLabel: 'Account ID',
+        secretPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 Cloudflare Account ID',
+        hint: 'Cloudflare 使用 API Token + Account ID 查询价格和注册域名。',
+      };
+    }
+    if (registrarCode === 'godaddy') {
+      return {
+        keyLabel: 'API Key',
+        keyPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 GoDaddy API Key',
+        secretLabel: 'API Secret',
+        secretPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 GoDaddy API Secret',
+        hint: 'GoDaddy 使用 API Key + API Secret 调用域名接口。',
+      };
+    }
+    return {
+      keyLabel: 'API Key / Token',
+      keyPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 API Key 或 Token',
+      secretLabel: 'API Secret / Account ID',
+      secretPlaceholder: editingRegAccount ? '留空表示不修改' : '请输入 API Secret 或 Account ID',
+      hint: '不同注册商凭据字段含义不同，请按注册商要求填写。',
+    };
+  };
+
   /** 判断当前用户是否可对某账号执行写操作（编辑/删除） */
   const canEditAccount = (ownerId: number | null) =>
     isSuperAdmin || ownerId === currentUser.id;
+
+  const regCredentialLabels = getRegCredentialLabels(regForm.registrar_code);
 
   if (loading) {
     return (
@@ -859,6 +934,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">注册商</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">默认注册账号</th>
                           {isSuperAdmin && (
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">归属专员</th>
                           )}
@@ -870,9 +946,30 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
                         {regAccounts.map((account) => (
-                          <tr key={account.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{account.name}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{findRegistrarName(account.registrar_code)}</td>
+                          <tr key={account.id} className={`hover:bg-gray-50 ${isDefaultRegAccount(account) ? 'bg-amber-50' : ''}`}>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                              <div className="flex items-center gap-2">
+                                <span>{account.name}</span>
+                                {isDefaultRegAccount(account) && (
+                                  <span className="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-800">默认</span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              <div>{findRegistrarName(account.registrar_code)}</div>
+                              <div className="text-xs text-gray-400">{account.registrar_code}</div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                              {isDefaultRegAccount(account) ? (
+                                <span className="text-amber-700">
+                                  {isSuperAdmin ? `默认：${getDefaultOwnerNames(account).join('、') || '—'}` : '当前默认'}
+                                </span>
+                              ) : canEditAccount(account.owner_id) ? (
+                                <button onClick={() => handleSetDefaultRegAccount(account)} className="text-amber-600 hover:text-amber-800">设为默认</button>
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
                             {isSuperAdmin && (
                               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {account.owner_name ?? <span className="text-gray-400 italic">未指定</span>}
@@ -903,14 +1000,22 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
 
                   {/* 移动端卡片 */}
                   <div className="md:hidden space-y-3">
-                    {regAccounts.map((account) => (
-                      <div key={account.id} className="border border-gray-200 rounded-lg p-4">
+                        {regAccounts.map((account) => (
+                      <div key={account.id} className={`border rounded-lg p-4 ${isDefaultRegAccount(account) ? 'border-amber-300 bg-amber-50' : 'border-gray-200'}`}>
                         <div className="flex justify-between items-start">
                           <div>
-                            <h3 className="font-medium text-gray-900">{account.name}</h3>
+                            <h3 className="font-medium text-gray-900">
+                              {account.name}
+                              {isDefaultRegAccount(account) && <span className="ml-2 text-xs text-amber-700">默认</span>}
+                            </h3>
                             <p className="text-sm text-gray-500 mt-1">{findRegistrarName(account.registrar_code)}</p>
                             {isSuperAdmin && account.owner_name && (
                               <p className="text-xs text-gray-400 mt-1">归属：{account.owner_name}</p>
+                            )}
+                            {isDefaultRegAccount(account) && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                {isSuperAdmin ? `默认归属：${getDefaultOwnerNames(account).join('、') || '—'}` : '当前默认注册账号'}
+                              </p>
                             )}
                           </div>
                           <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${account.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -920,6 +1025,9 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                         {account.remark && <p className="text-sm text-gray-400 mt-2">{account.remark}</p>}
                         {canEditAccount(account.owner_id) && (
                           <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
+                            {!isDefaultRegAccount(account) && (
+                              <button onClick={() => handleSetDefaultRegAccount(account)} className="text-amber-600 text-sm">设为默认</button>
+                            )}
                             <button onClick={() => openRegModal(account)} className="text-blue-600 text-sm">编辑</button>
                             <button onClick={() => handleRegDelete(account)} className="text-red-600 text-sm">删除</button>
                           </div>
@@ -974,18 +1082,36 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                         </select>
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{regCredentialLabels.keyLabel}</label>
                         <input type="password" value={regForm.api_key}
                           onChange={(e) => setRegForm({ ...regForm, api_key: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入 API Key'} />
+                          placeholder={regCredentialLabels.keyPlaceholder} />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">API Secret</label>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">{regCredentialLabels.secretLabel}</label>
                         <input type="password" value={regForm.api_secret}
                           onChange={(e) => setRegForm({ ...regForm, api_secret: e.target.value })}
                           className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                          placeholder={editingRegAccount ? '留空表示不修改' : '请输入 API Secret'} />
+                          placeholder={regCredentialLabels.secretPlaceholder} />
+                        <p className="text-xs text-gray-500 mt-1">{regCredentialLabels.hint}</p>
+                      </div>
+                      <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                        <input
+                          id="set-reg-default"
+                          type="checkbox"
+                          checked={regForm.set_as_default}
+                          onChange={(e) => setRegForm({ ...regForm, set_as_default: e.target.checked })}
+                          className="mt-1"
+                        />
+                        <label htmlFor="set-reg-default" className="text-sm text-amber-800">
+                          设为默认注册服务商
+                          <span className="block text-xs text-amber-700 mt-1">
+                            {editingRegAccount
+                              ? '提交后会额外发起默认配置确认，审批通过后此账号成为归属专员的默认注册账号。'
+                              : '创建账号审批通过后，自动将此账号设置为归属专员的默认注册账号。'}
+                          </span>
+                        </label>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">备注</label>

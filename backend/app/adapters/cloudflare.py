@@ -23,27 +23,33 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
 
     def check_domain_availability(self, domain: str) -> Dict[str, Any]:
         """检查域名是否可注册"""
-        url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains/{domain}/available"
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/domain-check"
+        payload = {"domains": [domain]}
 
         try:
-            response = requests.get(url, headers=self._get_headers())
+            response = requests.post(url, headers=self._get_headers(), json=payload)
             data = response.json()
 
             if data.get("success"):
-                result = data.get("result", {})
+                domains = (data.get("result") or {}).get("domains") or []
+                result = domains[0] if domains else {}
+                pricing = result.get("pricing") or {}
+                price = pricing.get("registration_cost") or result.get("price")
                 return {
-                    "available": result.get("available", False),
+                    "available": result.get("registrable", result.get("available", False)),
                     "domain": domain,
-                    "price": result.get("price", 0),
-                    "currency": result.get("currency", "USD"),
-                    "message": result.get("message", ""),
+                    "price": float(price) if price is not None else None,
+                    "currency": pricing.get("currency") or result.get("currency", "USD"),
+                    "message": result.get("reason") or result.get("message", ""),
+                    "tier": result.get("tier"),
                     "check_successful": True
                 }
             else:
+                errors = data.get("errors") or []
                 return {
                     "available": None,
                     "domain": domain,
-                    "message": "检查失败",
+                    "message": errors[0].get("message", "检查失败") if errors else "检查失败",
                     "check_successful": False
                 }
         except Exception as e:

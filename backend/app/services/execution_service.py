@@ -182,7 +182,10 @@ class ExecutionService:
 
         try:
             adapter = RegistrarFactory.create_registrar(
-                registrar_code, account.api_key, account.api_secret
+                registrar_code,
+                account.api_key,
+                account.api_secret,
+                account_id=account.api_secret if registrar_code == "cloudflare" else None,
             )
         except Exception as e:
             return {"success": False, "error": f"创建注册适配器失败: {str(e)}"}

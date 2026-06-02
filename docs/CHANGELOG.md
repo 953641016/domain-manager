@@ -11,6 +11,8 @@
 ### 新增
 - **飞书文档按钮申请流**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：新增 `POST /api/v1/feishu/doc-button/submit`，支持飞书多维表格/文档按钮仅传 `action + doc_url + doc_format + applicant_feishu_id`，后端读取 docx 内容并按 `domain_purchase`、`clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`、`all_dns_except_gsc` 归一生成申请。
 - **新版审批卡片**：购买域名卡片展示域名、申请人、注册账号下拉、注册年限、预估价格、来源文档、拒绝理由；DNS 卡片展示记录预览、DNS 账号下拉、审核备注、拒绝理由。审批通过后自动执行，拒绝后通知申请人。
+- **域名购买报价联动**（`backend/app/api/v1/feishu.py`）：购买域名审批卡片按审核人可用的 Cloudflare/GoDaddy 注册账号实时获取报价，下拉选项展示账号与价格；审批通过时按最终选择的账号重新查价，服务商明确返回不可注册时阻止执行。
+- **后台默认注册服务商配置**（`frontend/src/pages/Config.tsx`）：注册账号表单按 Cloudflare/GoDaddy 展示 Token、Account ID、API Key、Secret 等对应字段，支持新增/编辑时设为默认注册服务商；列表页用徽标与“默认注册账号”列清晰展示默认账号。
 - **文档解析配置**（`backend/app/config.py`）：新增 `FEISHU_DOC_APP_ID`、`FEISHU_DOC_APP_SECRET`、`BACKEND_DNS_DEFAULT_TARGET`，用于文档读取应用和后端接口域名默认解析目标。
 
 ### 安全/权限
@@ -18,6 +20,8 @@
 
 ### 修复
 - **飞书按钮参数兼容**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_service.py`）：`POST /api/v1/feishu/doc-button/submit` 兼容飞书多维表格以 Query 参数提交；`applicant_feishu_id` 支持传公司内唯一姓名，后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
+- **Cloudflare 注册商查价接口**（`backend/app/adapters/cloudflare.py`）：更新为官方 `domain-check` 接口，解析 `pricing.registration_cost` 作为注册价格。
+- **默认配置确认执行**（`backend/app/services/user_confirmation_service.py`）：补齐 `SET_DEFAULT_CONFIG` 审批通过后的落库逻辑；新增注册账号勾选“设为默认”时，审批通过后会写入归属专员默认注册账号。
 - **DNS 执行保护**（`backend/app/services/execution_service.py`）：对暂不支持的 DNS 记录类型提前标记失败，避免将 `REDIRECT_301` 等非标准 DNS 类型直接发送到解析服务商 API。
 
 ---

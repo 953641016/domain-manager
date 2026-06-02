@@ -81,6 +81,7 @@ class RegAccountCreate(BaseModel):
     api_secret: Optional[str] = Field(None, description="API Secret")
     remark: Optional[str] = Field(None, description="备注")
     target_owner_id: Optional[int] = Field(None, description="归属专员 ID（super_admin 创建时指定；domain_spec 忽略此字段）")
+    set_as_default: bool = Field(False, description="审批通过创建账号后，将该账号设为归属专员默认注册账号")
 
 
 class RegAccountUpdate(BaseModel):
