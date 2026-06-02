@@ -676,8 +676,7 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         "columns": [
                             {
                                 "tag": "column",
-                                "width": "weighted",
-                                "weight": 1,
+                                "width": "auto",
                                 "vertical_align": "top",
                                 "elements": [
                                     {
@@ -692,7 +691,8 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                             },
                             {
                                 "tag": "column",
-                                "width": "auto",
+                                "width": "weighted",
+                                "weight": 1,
                                 "vertical_align": "top",
                                 "elements": [
                                     {
