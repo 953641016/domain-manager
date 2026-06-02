@@ -1157,7 +1157,8 @@ async def _handle_card_action(body: dict) -> dict:
             return {"success": True, "message": "非账号授权卡片，忽略"}
 
         confirmation_id = int(confirmation_id)
-        operator_open_id = operator.get("open_id", "")
+        operator_open_id = operator.get("open_id", "") or operator.get("user_id", "")
+        form_values = _extract_card_form_values(body)
 
         from app.core.database import SessionLocal
         from app.services.user_confirmation_service import UserOperationConfirmationService
@@ -1184,7 +1185,7 @@ async def _handle_card_action(body: dict) -> dict:
                     approver_user_id=approver.id,
                     approver_name=approver.name,
                     approver_feishu_userid=operator_open_id,
-                    reject_reason="超级管理员拒绝",
+                    reject_reason=_as_text(form_values.get("reject_reason")) or "未填写",
                 )
                 return {"toast": {"type": "info" if result else "error",
                                   "content": "已拒绝操作申请" if result else "拒绝失败（已处理或不存在）"}}
@@ -1318,23 +1319,37 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
 
 
 def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
-    if not applicant:
-        return
-    receive_id = getattr(applicant, "feishu_open_id", None) or getattr(applicant, "feishu_user_id", None)
-    if not receive_id:
-        return
-    receive_type = "open_id" if getattr(applicant, "feishu_open_id", None) else "user_id"
     label = "域名购买" if req.type == "domain_register" else "DNS 解析"
-    content = (
-        f"❌ {label}申请已拒绝\n"
-        f"域名：{req.domain_name}\n"
-        f"审核人：{getattr(reviewer, 'name', '未知')}\n"
-        f"拒绝理由：{reason or '未填写'}"
-    )
-    try:
-        feishu_service.send_text_message(receive_id, content, receive_type)
-    except Exception:
-        pass
+    targets = []
+    if applicant:
+        targets.append((
+            applicant,
+            (
+                f"❌ {label}申请已拒绝\n"
+                f"域名：{req.domain_name}\n"
+                f"审核人：{getattr(reviewer, 'name', '未知')}\n"
+                f"拒绝理由：{reason or '未填写'}"
+            ),
+        ))
+    if reviewer and (not applicant or reviewer.id != applicant.id):
+        targets.append((
+            reviewer,
+            (
+                f"❌ 您已拒绝{label}申请\n"
+                f"域名：{req.domain_name}\n"
+                f"申请人：{getattr(applicant, 'name', req.requester_name)}\n"
+                f"拒绝理由：{reason or '未填写'}"
+            ),
+        ))
+    for user, content in targets:
+        receive_id = getattr(user, "feishu_open_id", None) or getattr(user, "feishu_user_id", None)
+        if not receive_id:
+            continue
+        receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
+        try:
+            feishu_service.send_text_message(receive_id, content, receive_type)
+        except Exception:
+            pass
 
 
 async def _handle_dns_card_action(card_action: str, value: dict, operator: dict) -> dict:
@@ -1346,7 +1361,7 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict)
     if not request_id:
         return {"toast": {"type": "error", "content": "卡片数据异常，缺少 request_id"}}
 
-    operator_open_id = operator.get("open_id", "")
+    operator_open_id = operator.get("open_id", "") or operator.get("user_id", "")
 
     db = SessionLocal()
     try:
@@ -1382,6 +1397,8 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict)
             return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
         else:
             req_svc.reject_request(request_id, specialist.id, specialist.name, reason="专员拒绝")
+            requester = user_svc.get_user(request.requester_id)
+            _notify_request_rejected(request, requester, specialist, "专员拒绝")
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
     except Exception as e:
         logger.exception("处理 DNS 审批卡片失败")

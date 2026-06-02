@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **超管审批卡片信息增强**（`backend/app/services/user_confirmation_service.py`）：账号/默认配置授权卡片新增申请时间、拒绝理由输入框（可选）、注册商/DNS 服务商信息；审批结果同时通知申请人和审核人。
 - **飞书文档按钮申请流**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：新增 `POST /api/v1/feishu/doc-button/submit`，支持飞书多维表格/文档按钮仅传 `action + doc_url + doc_format + applicant_feishu_id`，后端读取 docx 内容并按 `domain_purchase`、`clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`、`all_dns_except_gsc` 归一生成申请。
 - **新版审批卡片**：购买域名卡片展示域名、申请人、注册账号下拉、注册年限、预估价格、来源文档、拒绝理由；DNS 卡片展示记录预览、DNS 账号下拉、审核备注、拒绝理由。审批通过后自动执行，拒绝后通知申请人。
 - **域名购买报价联动**（`backend/app/api/v1/feishu.py`）：购买域名审批卡片按审核人可用的 Cloudflare/GoDaddy 注册账号实时获取报价，下拉选项展示账号与价格；审批通过时按最终选择的账号重新查价，服务商明确返回不可注册时阻止执行。

@@ -3,7 +3,7 @@
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_
 from app.models.user import User
@@ -242,6 +242,7 @@ class UserOperationConfirmationService:
 
         # 通知发起人（如实反映执行结果）
         self._notify_initiator(confirmation, approved=True, exec_error=exec_error)
+        self._notify_approver_result(confirmation, approved=True, exec_error=exec_error)
         # 通知目标用户（账号有实际变动 & 执行成功时才通知）
         if not exec_error:
             self._notify_target_user(confirmation)
@@ -301,6 +302,7 @@ class UserOperationConfirmationService:
         )
 
         self._notify_initiator(confirmation, approved=False)
+        self._notify_approver_result(confirmation, approved=False)
 
         return confirmation
 
@@ -577,6 +579,60 @@ class UserOperationConfirmationService:
             import logging
             logging.getLogger(__name__).warning("发送通知给发起人失败")
 
+    def _notify_approver_result(
+        self,
+        confirmation: UserOperationConfirmation,
+        approved: bool,
+        exec_error: Optional[str] = None,
+    ) -> None:
+        """通知审核人处理结果（适用于所有超管确认场景）。"""
+        if not confirmation.approver_user_id:
+            return
+        if confirmation.approver_user_id == confirmation.initiator_user_id:
+            return
+        approver = self.db.query(User).filter_by(id=confirmation.approver_user_id).first()
+        if not approver:
+            return
+        receive_id = getattr(approver, "feishu_open_id", None) or getattr(approver, "feishu_user_id", None)
+        if not receive_id:
+            return
+        receive_type = "open_id" if getattr(approver, "feishu_open_id", None) else "user_id"
+        desc = self.format_operation_description(confirmation).replace("【需超级管理员确认】", "").strip()
+        if not approved:
+            title = "❌ 您已拒绝操作申请"
+            color = "red"
+            body = (
+                f"**操作**：{desc}\n"
+                f"**申请人**：{confirmation.initiator_name}\n"
+                f"**拒绝理由**：{confirmation.reject_reason or '未填写'}"
+            )
+        elif exec_error:
+            title = "⚠️ 您批准的操作执行失败"
+            color = "orange"
+            body = (
+                f"**操作**：{desc}\n"
+                f"**申请人**：{confirmation.initiator_name}\n"
+                f"**失败原因**：{self._friendly_error(exec_error)}"
+            )
+        else:
+            title = "✅ 您已批准并执行成功"
+            color = "green"
+            body = (
+                f"**操作**：{desc}\n"
+                f"**申请人**：{confirmation.initiator_name}"
+            )
+        card = {
+            "config": {"wide_screen_mode": True},
+            "header": {"title": {"tag": "plain_text", "content": title}, "template": color},
+            "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body}}],
+        }
+        try:
+            from app.services.feishu_service import FeishuService
+            FeishuService().send_card_message(receive_id, card, receive_type)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning("发送通知给审核人失败，user_id=%s", confirmation.approver_user_id)
+
     def _notify_target_user(
         self,
         confirmation: UserOperationConfirmation,
@@ -837,6 +893,12 @@ class UserOperationConfirmationService:
         else:
             acc_name = details.get("data", {}).get("name") or details.get("account_name", "")
             op_target = acc_name or "—"
+            account_info = self._account_operation_info(op_type, details)
+            if account_info:
+                change_elements = [
+                    {"tag": "hr"},
+                    {"tag": "div", "text": {"tag": "lark_md", "content": account_info}},
+                ]
 
         # 危险操作在事项行加醒目标注
         danger_note = {
@@ -849,6 +911,7 @@ class UserOperationConfirmationService:
 
         main_lines = [
             f"**申请人**：{confirmation.initiator_name}",
+            f"**申请时间**：{self._format_dt(confirmation.created_at)}",
             f"**操作事项**：{op_event_display}",
             f"**操作对象**：{op_target}",
         ]
@@ -876,6 +939,11 @@ class UserOperationConfirmationService:
         elements.extend([
             {"tag": "hr"},
             {
+                "tag": "input",
+                "name": "reject_reason",
+                "placeholder": {"tag": "plain_text", "content": "拒绝理由（可选）"},
+            },
+            {
                 "tag": "action",
                 "actions": [
                     {
@@ -894,7 +962,7 @@ class UserOperationConfirmationService:
             },
             {
                 "tag": "note",
-                "elements": [{"tag": "plain_text", "content": "⏱ 申请有效期 24 小时，逾期自动作废"}],
+                "elements": [{"tag": "plain_text", "content": "⏱ 申请有效期 24 小时，拒绝理由可不填；逾期自动作废"}],
             },
         ])
 
@@ -922,6 +990,93 @@ class UserOperationConfirmationService:
         if not role:
             return "未指定"
         return ROLE_PERMISSIONS.get(role, {}).get("name", role)
+
+    @staticmethod
+    def _format_dt(value) -> str:
+        if not value:
+            return "—"
+        try:
+            china_tz = timezone(timedelta(hours=8))
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            value = value.astimezone(china_tz)
+            return value.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return str(value)
+
+    def _account_operation_info(self, op_type: str, details: dict) -> str:
+        """生成账号授权卡片中的注册商/DNS服务商信息。"""
+        data = details.get("data") or {}
+        lines = []
+        if op_type in (
+            ConfirmationOperationType.ADD_REG_ACCOUNT,
+            ConfirmationOperationType.UPDATE_REG_ACCOUNT,
+            ConfirmationOperationType.DELETE_REG_ACCOUNT,
+        ):
+            registrar_code = data.get("registrar_code")
+            account_name = data.get("name")
+            if not registrar_code or not account_name:
+                try:
+                    from app.models.domain import RegAccount
+                    account_id = details.get("account_id")
+                    account = self.db.query(RegAccount).filter_by(id=account_id).first() if account_id else None
+                    if account:
+                        registrar_code = registrar_code or account.registrar_code
+                        account_name = account_name or account.name
+                except Exception:
+                    pass
+            lines.append("**注册商信息**：")
+            lines.append(f"· 注册账号：{account_name or '—'}")
+            lines.append(f"· 注册商：{registrar_code or '—'}")
+            if data.get("set_as_default") or details.get("set_as_default"):
+                lines.append("· 默认注册服务商：是")
+        elif op_type in (
+            ConfirmationOperationType.ADD_DNS_ACCOUNT,
+            ConfirmationOperationType.UPDATE_DNS_ACCOUNT,
+            ConfirmationOperationType.DELETE_DNS_ACCOUNT,
+        ):
+            provider_code = data.get("provider_code")
+            account_name = data.get("name")
+            if not provider_code or not account_name:
+                try:
+                    from app.models.domain import DnsAccount
+                    account_id = details.get("account_id")
+                    account = self.db.query(DnsAccount).filter_by(id=account_id).first() if account_id else None
+                    if account:
+                        provider_code = provider_code or account.provider_code
+                        account_name = account_name or account.name
+                except Exception:
+                    pass
+            lines.append("**解析商信息**：")
+            lines.append(f"· DNS账号：{account_name or '—'}")
+            lines.append(f"· DNS服务商：{provider_code or '—'}")
+        elif op_type == ConfirmationOperationType.SET_DEFAULT_CONFIG:
+            changes = details.get("changes") or {}
+            reg_account_id = changes.get("default_reg_account_id")
+            dns_account_id = changes.get("default_dns_account_id")
+            if reg_account_id:
+                try:
+                    from app.models.domain import RegAccount
+                    account = self.db.query(RegAccount).filter_by(id=reg_account_id).first()
+                    lines.append("**注册商信息**：")
+                    lines.append(f"· 默认注册账号：{account.name if account else reg_account_id}")
+                    lines.append(f"· 默认注册商：{account.registrar_code if account else changes.get('default_registrar', '—')}")
+                except Exception:
+                    lines.append("**注册商信息**：")
+                    lines.append(f"· 默认注册账号：{reg_account_id}")
+                    lines.append(f"· 默认注册商：{changes.get('default_registrar', '—')}")
+            if dns_account_id:
+                try:
+                    from app.models.domain import DnsAccount
+                    account = self.db.query(DnsAccount).filter_by(id=dns_account_id).first()
+                    lines.append("**解析商信息**：")
+                    lines.append(f"· 默认DNS账号：{account.name if account else dns_account_id}")
+                    lines.append(f"· 默认DNS服务商：{account.provider_code if account else changes.get('default_dns_provider', '—')}")
+                except Exception:
+                    lines.append("**解析商信息**：")
+                    lines.append(f"· 默认DNS账号：{dns_account_id}")
+                    lines.append(f"· 默认DNS服务商：{changes.get('default_dns_provider', '—')}")
+        return "\n".join(lines)
 
     @staticmethod
     def _friendly_error(error: str) -> str:
