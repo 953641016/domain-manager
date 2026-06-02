@@ -1,4 +1,4 @@
-"""
+﻿"""
 Cloudflare注册商和DNS解析适配器
 """
 import requests
@@ -13,6 +13,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         super().__init__(api_key)
         self.account_id = account_id
         self.base_url = "https://api.cloudflare.com/client/v4"
+        self.timeout = 4
 
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
@@ -27,7 +28,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         payload = {"domains": [domain]}
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -77,7 +78,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
             payload["nameservers"] = nameservers
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -113,7 +114,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         }
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -143,7 +144,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains/{domain}"
 
         try:
-            response = requests.get(url, headers=self._get_headers())
+            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -171,7 +172,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         }
 
         try:
-            response = requests.patch(url, headers=self._get_headers(), json=payload)
+            response = requests.patch(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -206,7 +207,7 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         }
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -404,3 +405,4 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
                 "success": False,
                 "message": f"删除出错: {str(e)}"
             }
+

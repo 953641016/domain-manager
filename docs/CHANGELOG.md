@@ -20,6 +20,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **注册商 API 超时保护**（`backend/app/adapters/cloudflare.py`、`backend/app/adapters/godaddy.py`）：Cloudflare/GoDaddy 查价与注册相关 HTTP 请求增加 4 秒超时，避免飞书文档按钮提交时被外部服务慢响应拖到客户端超时。
 - **飞书按钮参数兼容**（`backend/app/api/v1/feishu.py`、`backend/app/services/user_service.py`）：`POST /api/v1/feishu/doc-button/submit` 兼容飞书多维表格以 Query 参数提交；`applicant_feishu_id` 支持传公司内唯一姓名，后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - **Cloudflare 注册商查价接口**（`backend/app/adapters/cloudflare.py`）：更新为官方 `domain-check` 接口，解析 `pricing.registration_cost` 作为注册价格。
 - **默认配置确认执行**（`backend/app/services/user_confirmation_service.py`）：补齐 `SET_DEFAULT_CONFIG` 审批通过后的落库逻辑；新增注册账号勾选“设为默认”时，审批通过后会写入归属专员默认注册账号。

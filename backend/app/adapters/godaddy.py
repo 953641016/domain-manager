@@ -1,4 +1,4 @@
-"""
+﻿"""
 GoDaddy注册商适配器
 """
 import requests
@@ -12,6 +12,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
     def __init__(self, api_key: str, api_secret: str):
         super().__init__(api_key, api_secret)
         self.base_url = "https://api.godaddy.com/v1"
+        self.timeout = 4
 
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
@@ -28,7 +29,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
         params = {"domain": domain}
 
         try:
-            response = requests.get(url, headers=self._get_headers(), params=params)
+            response = requests.get(url, headers=self._get_headers(), params=params, timeout=self.timeout)
             data = response.json()
 
             if "available" in data:
@@ -79,7 +80,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
             payload["nameServers"] = nameservers
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if response.status_code in [200, 201]:
@@ -113,7 +114,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
         }
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload)
+            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
             data = response.json()
 
             if response.status_code in [200, 204]:
@@ -141,7 +142,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
         url = f"{self.base_url}/domains/{domain}"
 
         try:
-            response = requests.get(url, headers=self._get_headers())
+            response = requests.get(url, headers=self._get_headers(), timeout=self.timeout)
             data = response.json()
 
             if response.status_code == 200:
@@ -256,3 +257,4 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
                 "success": False,
                 "message": f"获取出错: {str(e)}"
             }
+
