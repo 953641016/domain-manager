@@ -548,7 +548,7 @@ class UserOperationConfirmationService:
         receive_type = "open_id" if getattr(initiator, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation)
         desc = desc.replace("【需超级管理员确认】", "").strip()
-        processed_time = self._format_dt(confirmation.approved_at)
+        processed_time = self._format_dt(getattr(confirmation, "confirmed_at", None))
         if not approved:
             card_title = "❌ 操作申请被拒绝"
             card_color = "red"
@@ -599,7 +599,7 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(approver, "feishu_open_id", None) else "user_id"
         desc = self.format_operation_description(confirmation).replace("【需超级管理员确认】", "").strip()
-        processed_time = self._format_dt(confirmation.approved_at)
+        processed_time = self._format_dt(getattr(confirmation, "confirmed_at", None))
         if not approved:
             title = "❌ 您已拒绝操作申请"
             color = "red"
