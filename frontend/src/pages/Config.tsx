@@ -929,7 +929,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 <>
                   {/* 桌面端表格 */}
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
+                    <table className="min-w-[1180px] divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
@@ -939,9 +939,9 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">归属专员</th>
                           )}
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">备注</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-56">备注</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
+                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[128px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -980,9 +980,11 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                                 {account.is_active ? '启用' : '禁用'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500 max-w-56">
+                              <div className="truncate" title={account.remark || ''}>{account.remark || '-'}</div>
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <td className={`sticky right-0 z-10 px-6 py-4 whitespace-nowrap text-right text-sm font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)] ${isDefaultRegAccount(account) ? 'bg-amber-50' : 'bg-white'}`}>
                               {canEditAccount(account.owner_id) ? (
                                 <>
                                   <button onClick={() => openRegModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
@@ -1156,7 +1158,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 <>
                   {/* 桌面端表格 */}
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="min-w-full divide-y divide-gray-200">
+                    <table className="min-w-[980px] divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
@@ -1165,9 +1167,9 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">归属专员</th>
                           )}
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
-                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">备注</th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-56">备注</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
-                          <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">操作</th>
+                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[128px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1185,9 +1187,11 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                                 {account.is_active ? '启用' : '禁用'}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{account.remark || '-'}</td>
+                            <td className="px-6 py-4 text-sm text-gray-500 max-w-56">
+                              <div className="truncate" title={account.remark || ''}>{account.remark || '-'}</div>
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{formatDateTime(account.created_at)}</td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <td className="sticky right-0 z-10 bg-white px-6 py-4 whitespace-nowrap text-right text-sm font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">
                               {canEditAccount(account.owner_id) ? (
                                 <>
                                   <button onClick={() => openDnsModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
