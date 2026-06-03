@@ -33,9 +33,19 @@ interface AccountOption {
   owner_name?: string | null;
 }
 
+function getCurrentUser(): { id?: number; role?: string; name?: string } {
+  try {
+    return JSON.parse(localStorage.getItem('user') || '{}');
+  } catch {
+    return {};
+  }
+}
+
 export default function RequestDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const currentUser = getCurrentUser();
+  const canOperateRequest = ['domain_spec', 'super_admin'].includes(currentUser.role || '');
   const [request, setRequest] = useState<RequestDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -48,7 +58,9 @@ export default function RequestDetailPage() {
   useEffect(() => {
     if (id) {
       fetchRequest();
-      fetchAccounts();
+      if (canOperateRequest) {
+        fetchAccounts();
+      }
     }
   }, [id]);
 
@@ -286,7 +298,7 @@ export default function RequestDetailPage() {
           )}
         </div>
 
-        {request.status === 'pending' && (
+        {request.status === 'pending' && canOperateRequest && (
           <div className="px-6 py-4 border-t border-gray-200 bg-gray-50">
             <div className="space-y-4">
               {request.type === 'domain_register' && (

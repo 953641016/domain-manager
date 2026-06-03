@@ -5,7 +5,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import get_current_active_user, require_manage_users, require_approve_request
+from app.api.dependencies import get_current_active_user, require_approve_request, require_domain_spec
 from app.services.request_service import RequestService
 from app.schemas.request import (
     RequestCreate, RequestUpdate, RequestApprove, RequestReject,
@@ -273,7 +273,7 @@ def create_request(
 def update_request(
     request_id: str,
     data: RequestUpdate,
-    current_user: User = Depends(require_approve_request),
+    current_user: User = Depends(require_domain_spec),
     db: Session = Depends(get_db),
 ):
     """
@@ -297,7 +297,7 @@ def update_request(
 def approve_request(
     request_id: str,
     data: RequestApprove = RequestApprove(),
-    current_user: User = Depends(require_approve_request),
+    current_user: User = Depends(require_domain_spec),
     db: Session = Depends(get_db),
 ):
     """
@@ -360,7 +360,7 @@ def approve_request(
 def reject_request(
     request_id: str,
     data: RequestReject,
-    current_user: User = Depends(require_approve_request),
+    current_user: User = Depends(require_domain_spec),
     db: Session = Depends(get_db),
 ):
     """
