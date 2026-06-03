@@ -125,6 +125,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
   // ========== 注册账号 ==========
   const [regAccounts, setRegAccounts] = useState<RegAccount[]>([]);
   const [regAccountsLoading, setRegAccountsLoading] = useState(false);
+  const [selfCheckingAccount, setSelfCheckingAccount] = useState('');
   const [showRegModal, setShowRegModal] = useState(false);
   const [editingRegAccount, setEditingRegAccount] = useState<RegAccount | null>(null);
   const [regForm, setRegForm] = useState({
@@ -411,6 +412,35 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
       loadDnsAccounts();
     } catch (err: any) {
       alert('操作失败: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const formatSelfCheckResult = (result: any) => {
+    const checks = Array.isArray(result?.checks) ? result.checks : [];
+    const lines = [
+      result?.success ? '✅ 自检通过' : '❌ 自检失败',
+      result?.message ? `结果：${result.message}` : '',
+      ...checks.map((item: any) => `${item.success ? '✓' : '✗'} ${item.name}: ${item.message || '-'}`),
+    ].filter(Boolean);
+
+    const details = result?.details || {};
+    const detailLines = Object.entries(details)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => `${key}: ${value}`);
+
+    return [...lines, ...(detailLines.length ? ['', '详情：', ...detailLines] : [])].join('\n');
+  };
+
+  const handleSelfCheck = async (type: 'reg' | 'dns', account: RegAccount | DnsAccount) => {
+    const key = `${type}-${account.id}`;
+    try {
+      setSelfCheckingAccount(key);
+      const res = await api.post(`/domains/accounts/${type}/${account.id}/self-check`);
+      alert(formatSelfCheckResult(res.data));
+    } catch (err: any) {
+      alert('自检失败: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setSelfCheckingAccount('');
     }
   };
 
@@ -970,7 +1000,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-56">备注</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
-                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[128px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
+                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[180px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1016,6 +1046,13 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <td className={`sticky right-0 z-10 px-6 py-4 whitespace-nowrap text-right text-sm font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)] ${isDefaultRegAccount(account) ? 'bg-amber-50' : 'bg-white'}`}>
                               {canEditAccount(account.owner_id) ? (
                                 <>
+                                  <button
+                                    onClick={() => handleSelfCheck('reg', account)}
+                                    disabled={selfCheckingAccount === `reg-${account.id}`}
+                                    className="text-green-600 hover:text-green-900 mr-3 disabled:text-gray-400"
+                                  >
+                                    {selfCheckingAccount === `reg-${account.id}` ? '检测中' : '自检'}
+                                  </button>
                                   <button onClick={() => openRegModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
                                   <button onClick={() => handleRegDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
                                 </>
@@ -1059,6 +1096,13 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             {!isDefaultRegAccount(account) && (
                               <button onClick={() => handleSetDefaultRegAccount(account)} className="text-amber-600 text-sm">设为默认</button>
                             )}
+                            <button
+                              onClick={() => handleSelfCheck('reg', account)}
+                              disabled={selfCheckingAccount === `reg-${account.id}`}
+                              className="text-green-600 text-sm disabled:text-gray-400"
+                            >
+                              {selfCheckingAccount === `reg-${account.id}` ? '检测中' : '自检'}
+                            </button>
                             <button onClick={() => openRegModal(account)} className="text-blue-600 text-sm">编辑</button>
                             <button onClick={() => handleRegDelete(account)} className="text-red-600 text-sm">删除</button>
                           </div>
@@ -1187,7 +1231,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                 <>
                   {/* 桌面端表格 */}
                   <div className="hidden md:block overflow-x-auto">
-                    <table className="min-w-[980px] divide-y divide-gray-200">
+                    <table className="min-w-[1040px] divide-y divide-gray-200">
                       <thead className="bg-gray-50">
                         <tr>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">账号名称</th>
@@ -1198,7 +1242,7 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase w-56">备注</th>
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
-                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[128px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
+                          <th className="sticky right-0 z-20 bg-gray-50 px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase min-w-[180px] shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">操作</th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -1223,6 +1267,13 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                             <td className="sticky right-0 z-10 bg-white px-6 py-4 whitespace-nowrap text-right text-sm font-medium shadow-[-8px_0_12px_-12px_rgba(0,0,0,0.35)]">
                               {canEditAccount(account.owner_id) ? (
                                 <>
+                                  <button
+                                    onClick={() => handleSelfCheck('dns', account)}
+                                    disabled={selfCheckingAccount === `dns-${account.id}`}
+                                    className="text-green-600 hover:text-green-900 mr-3 disabled:text-gray-400"
+                                  >
+                                    {selfCheckingAccount === `dns-${account.id}` ? '检测中' : '自检'}
+                                  </button>
                                   <button onClick={() => openDnsModal(account)} className="text-blue-600 hover:text-blue-900 mr-3">编辑</button>
                                   <button onClick={() => handleDnsDelete(account)} className="text-red-600 hover:text-red-900">删除</button>
                                 </>
@@ -1255,6 +1306,13 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
                         {account.remark && <p className="text-sm text-gray-400 mt-2">{account.remark}</p>}
                         {canEditAccount(account.owner_id) && (
                           <div className="flex justify-end space-x-3 mt-3 pt-3 border-t border-gray-100">
+                            <button
+                              onClick={() => handleSelfCheck('dns', account)}
+                              disabled={selfCheckingAccount === `dns-${account.id}`}
+                              className="text-green-600 text-sm disabled:text-gray-400"
+                            >
+                              {selfCheckingAccount === `dns-${account.id}` ? '检测中' : '自检'}
+                            </button>
                             <button onClick={() => openDnsModal(account)} className="text-blue-600 text-sm">编辑</button>
                             <button onClick={() => handleDnsDelete(account)} className="text-red-600 text-sm">删除</button>
                           </div>

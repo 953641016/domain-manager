@@ -1,7 +1,13 @@
 """
 域名管理API路由
+
+账号自检路由说明：
+- 权限：require_view_accounts，domain_spec 仅可检测自己账号，super_admin 可检测全部账号
+- 超管确认：不需要；自检只读取服务商接口，不新增/修改/删除账号配置
+- 返回格式：对象 {success, status, message, checks, details}
 """
 from typing import Optional
+import requests
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
@@ -20,6 +26,7 @@ from app.schemas.domain import (
     DnsAccountCreate, DnsAccountUpdate, DnsAccountResponse
 )
 from app.models.user import User
+from app.adapters.registrar_factory import RegistrarFactory
 
 router = APIRouter(
     prefix="/domains",
@@ -191,6 +198,22 @@ def get_reg_account(
     return _with_owner(RegAccountResponse, account, owner_map)
 
 
+@router.post("/accounts/reg/{account_id}/self-check")
+def self_check_reg_account(
+    account_id: int,
+    current_user: User = Depends(require_view_accounts),
+    db: Session = Depends(get_db),
+):
+    """注册账号自检：只读调用注册商查价/可用性接口，不修改账号配置。"""
+    service = DomainService(db)
+    account = service.get_reg_account(account_id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
+    if current_user.role == "domain_spec" and account.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权检测他人账号")
+    return _self_check_reg_account(service, account)
+
+
 def _check_account_ownership(db, account_id: int, current_user: User, model_class) -> None:
     """归属校验：domain_spec 只能操作自己 owner 的账号（#2 归属校验）"""
     if current_user.role == "super_admin":
@@ -200,6 +223,160 @@ def _check_account_ownership(db, account_id: int, current_user: User, model_clas
         raise HTTPException(status_code=404, detail="账号不存在")
     if account.owner_id != current_user.id:
         raise HTTPException(status_code=403, detail="无权操作他人的账号")
+
+
+def _format_provider_error(data, fallback: str = "服务商接口调用失败") -> str:
+    if isinstance(data, dict):
+        errors = data.get("errors")
+        if errors:
+            return str(errors)
+        code = data.get("code")
+        message = data.get("message") or data.get("detail")
+        if code and message:
+            return f"{code}: {message}"
+        if message:
+            return str(message)
+        if code:
+            return str(code)
+    return fallback
+
+
+def _self_check_reg_account(service: DomainService, account: RegAccount) -> dict:
+    decrypted = service.get_reg_account_decrypted(account.id)
+    checks = []
+    details = {
+        "account_id": account.id,
+        "account_name": account.name,
+        "registrar_code": account.registrar_code,
+    }
+
+    if not decrypted or not decrypted.api_key:
+        return {
+            "success": False,
+            "status": "failed",
+            "message": "账号未配置 API Key / Token",
+            "checks": [{"name": "凭据配置", "success": False, "message": "账号未配置 API Key / Token"}],
+            "details": details,
+        }
+
+    if decrypted.registrar_code == "cloudflare" and not decrypted.api_secret:
+        return {
+            "success": False,
+            "status": "failed",
+            "message": "Cloudflare 注册账号未配置 Account ID",
+            "checks": [{"name": "凭据配置", "success": False, "message": "Cloudflare 注册账号未配置 Account ID"}],
+            "details": details,
+        }
+
+    try:
+        adapter = RegistrarFactory.create_registrar(
+            decrypted.registrar_code,
+            decrypted.api_key,
+            decrypted.api_secret,
+            account_id=decrypted.api_secret if decrypted.registrar_code == "cloudflare" else None,
+        )
+        quote = adapter.check_domain_availability("example-test-20260603-domain.com") or {}
+    except Exception as e:
+        quote = {"check_successful": False, "message": str(e)}
+
+    check_success = bool(quote.get("check_successful"))
+    checks.append({
+        "name": "查价/可注册性接口",
+        "success": check_success,
+        "message": quote.get("message") or ("接口可访问" if check_success else "检查失败"),
+    })
+    details.update({
+        "test_domain": quote.get("domain") or "example-test-20260603-domain.com",
+        "available": quote.get("available"),
+        "price": quote.get("price"),
+        "currency": quote.get("currency"),
+        "provider_message": quote.get("message"),
+    })
+
+    return {
+        "success": check_success,
+        "status": "ok" if check_success else "failed",
+        "message": "注册账号自检通过" if check_success else (quote.get("message") or "注册账号自检失败"),
+        "checks": checks,
+        "details": details,
+    }
+
+
+def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict:
+    decrypted = service.get_dns_account_decrypted(account.id)
+    details = {
+        "account_id": account.id,
+        "account_name": account.name,
+        "provider_code": account.provider_code,
+    }
+    if not decrypted or not decrypted.api_key:
+        return {
+            "success": False,
+            "status": "failed",
+            "message": "账号未配置 API Key / Token",
+            "checks": [{"name": "凭据配置", "success": False, "message": "账号未配置 API Key / Token"}],
+            "details": details,
+        }
+
+    checks = []
+    if decrypted.provider_code == "cloudflare":
+        headers = {"Authorization": f"Bearer {decrypted.api_key}", "Content-Type": "application/json"}
+        try:
+            verify_resp = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify", headers=headers, timeout=10)
+            verify_data = verify_resp.json()
+        except Exception as e:
+            verify_data = {"success": False, "errors": [str(e)]}
+        verify_ok = bool(verify_data.get("success"))
+        checks.append({
+            "name": "Token 验证",
+            "success": verify_ok,
+            "message": "Token 有效" if verify_ok else _format_provider_error(verify_data, "Token 验证失败"),
+        })
+
+        try:
+            zones_resp = requests.get(
+                "https://api.cloudflare.com/client/v4/zones",
+                headers=headers,
+                params={"per_page": 1},
+                timeout=10,
+            )
+            zones_data = zones_resp.json()
+        except Exception as e:
+            zones_data = {"success": False, "errors": [str(e)]}
+        zones_ok = bool(zones_data.get("success"))
+        checks.append({
+            "name": "Zone 读取权限",
+            "success": zones_ok,
+            "message": "可读取 Zone 列表" if zones_ok else _format_provider_error(zones_data, "Zone 读取失败"),
+        })
+        result_info = zones_data.get("result_info") or {}
+        details.update({
+            "zone_count": result_info.get("total_count"),
+            "sample_zone": ((zones_data.get("result") or [{}])[0] or {}).get("name") if zones_ok else None,
+        })
+    elif decrypted.provider_code == "dnspod":
+        try:
+            adapter = RegistrarFactory.create_dns_provider("dnspod", decrypted.api_key, decrypted.api_secret)
+            resp = adapter._request("DescribeDomainList", {"Type": "1", "Offset": 0, "Limit": 1})
+            checks.append({"name": "域名列表读取权限", "success": True, "message": "可读取 DNSPod 域名列表"})
+            details.update({
+                "domain_count": resp.get("DomainCountInfo", {}).get("Total") if isinstance(resp, dict) else None,
+                "sample_domain": ((resp.get("DomainList") or [{}])[0] or {}).get("Name") if isinstance(resp, dict) else None,
+            })
+        except Exception as e:
+            checks.append({"name": "域名列表读取权限", "success": False, "message": str(e)})
+    else:
+        checks.append({"name": "服务商支持", "success": False, "message": f"暂不支持自检的 DNS 服务商: {decrypted.provider_code}"})
+
+    success = all(item.get("success") for item in checks)
+    failed = next((item for item in checks if not item.get("success")), None)
+    return {
+        "success": success,
+        "status": "ok" if success else "failed",
+        "message": "DNS账号自检通过" if success else (failed.get("message") if failed else "DNS账号自检失败"),
+        "checks": checks,
+        "details": details,
+    }
 
 
 def _make_confirmation(
@@ -314,6 +491,22 @@ def get_dns_account(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权查看他人账号")
     owner_map = _build_owner_map(db, [account])
     return _with_owner(DnsAccountResponse, account, owner_map)
+
+
+@router.post("/accounts/dns/{account_id}/self-check")
+def self_check_dns_account(
+    account_id: int,
+    current_user: User = Depends(require_view_accounts),
+    db: Session = Depends(get_db),
+):
+    """DNS账号自检：只读调用 DNS 服务商 Token/域名列表接口，不修改账号配置。"""
+    service = DomainService(db)
+    account = service.get_dns_account(account_id)
+    if not account:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="账号不存在")
+    if current_user.role == "domain_spec" and account.owner_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权检测他人账号")
+    return _self_check_dns_account(service, account)
 
 
 @router.post("/accounts/dns")

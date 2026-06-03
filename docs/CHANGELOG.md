@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **服务商账号自检**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：注册账号和 DNS 账号列表新增“自检”按钮；后端只读调用服务商接口检查凭据与权限，注册账号检测查价/可注册性接口，Cloudflare DNS 检测 Token 与 Zone 读取权限，DNSPod 检测域名列表读取权限，并在前端展示原始失败原因。
 - **Cloudflare 重定向规则执行**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：DNS 申请中的 `REDIRECT_301`、`REDIRECT_302` 不再按普通 DNS 记录处理，Cloudflare 账号会通过 Rulesets API 创建或更新 Single Redirect 规则，并保持审批重复点击时幂等更新。
 - **后台申请详情账号选择**（`frontend/src/pages/Requests/Detail.tsx`）：后台 `/requests` 详情页待审批申请新增注册账号/DNS账号下拉选择，点击通过时会将所选账号传给后端执行，未选择时仍保留后端自动推断。
 - **超管审批卡片信息增强**（`backend/app/services/user_confirmation_service.py`）：账号/默认配置授权卡片新增申请时间、拒绝理由输入框（可选）、注册商/DNS 服务商信息；审批结果同时通知申请人和审核人。
