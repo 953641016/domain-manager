@@ -217,6 +217,12 @@ def get_request(
                 detail="无权查看此申请"
             )
 
+    if request.type == "dns_record" and request.status == "pending" and not request.selected_dns_account_id:
+        account = _infer_dns_account_for_request(db, request, current_user)
+        if account:
+            request.selected_dns_account_id = account.id
+            request.selected_dns_provider_code = account.provider_code
+
     return RequestResponse.model_validate(request)
 
 

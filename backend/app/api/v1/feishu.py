@@ -372,6 +372,10 @@ def submit_doc_button_request(
         accounts = _get_reviewable_dns_accounts(db, specialist)
         if not accounts:
             raise HTTPException(status_code=400, detail="归属域名专员没有可用 DNS 账号")
+        default_account = _pick_default_dns_account(db, specialist, parsed.domain, accounts)
+        if default_account:
+            request_data["default_dns_account_id"] = default_account.id
+            request_data["default_dns_provider_code"] = default_account.provider_code
 
     req_svc = RequestService(db)
     if parsed.request_type == "domain_register":
@@ -478,6 +482,33 @@ def _pick_default_reg_account(db: Session, reviewer, accounts: List[Any]):
     defaults = db.query(SystemDefaults).filter(SystemDefaults.user_id == reviewer.id).first()
     if defaults and defaults.default_reg_account_id in account_map:
         return account_map[defaults.default_reg_account_id]
+    return accounts[0] if accounts else None
+
+
+def _pick_default_dns_account(db: Session, reviewer, domain_name: str, accounts: List[Any]):
+    from app.models.domain import Domain
+    from app.models.request import Request
+    from app.models.system import SystemDefaults
+
+    account_map = {account.id: account for account in accounts}
+
+    domain = db.query(Domain).filter(Domain.name == domain_name).first()
+    if domain and domain.dns_account_id in account_map:
+        return account_map[domain.dns_account_id]
+
+    previous = db.query(Request).filter(
+        Request.type == "dns_record",
+        Request.domain_name == domain_name,
+        Request.selected_dns_account_id.isnot(None),
+        Request.status.in_(["approved", "completed"]),
+    ).order_by(Request.updated_at.desc(), Request.created_at.desc()).first()
+    if previous and previous.selected_dns_account_id in account_map:
+        return account_map[previous.selected_dns_account_id]
+
+    defaults = db.query(SystemDefaults).filter(SystemDefaults.user_id == reviewer.id).first()
+    if defaults and defaults.default_dns_account_id in account_map:
+        return account_map[defaults.default_dns_account_id]
+
     return accounts[0] if accounts else None
 
 
@@ -714,7 +745,12 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
     if len(records) > 12:
         preview += f"\n... 另有 {len(records) - 12} 条"
     account_options = _select_options(accounts, "provider_code")
-    initial_option_text = account_options[0].get("text", {}).get("content") if account_options else ""
+    default_account_id = str(data.get("default_dns_account_id") or (accounts[0].id if accounts else ""))
+    initial_option = next(
+        (opt for opt in account_options if opt.get("value") == default_account_id),
+        account_options[0] if account_options else {},
+    )
+    initial_option_text = initial_option.get("text", {}).get("content") or ""
     return {
         "config": {"wide_screen_mode": True},
         "header": {
