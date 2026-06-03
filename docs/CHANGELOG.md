@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **Cloudflare 重定向规则执行**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：DNS 申请中的 `REDIRECT_301`、`REDIRECT_302` 不再按普通 DNS 记录处理，Cloudflare 账号会通过 Rulesets API 创建或更新 Single Redirect 规则，并保持审批重复点击时幂等更新。
 - **后台申请详情账号选择**（`frontend/src/pages/Requests/Detail.tsx`）：后台 `/requests` 详情页待审批申请新增注册账号/DNS账号下拉选择，点击通过时会将所选账号传给后端执行，未选择时仍保留后端自动推断。
 - **超管审批卡片信息增强**（`backend/app/services/user_confirmation_service.py`）：账号/默认配置授权卡片新增申请时间、拒绝理由输入框（可选）、注册商/DNS 服务商信息；审批结果同时通知申请人和审核人。
 - **飞书文档按钮申请流**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：新增 `POST /api/v1/feishu/doc-button/submit`，支持飞书多维表格/文档按钮仅传 `action + doc_url + doc_format + applicant_feishu_id`，后端读取 docx 内容并按 `domain_purchase`、`clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`、`all_dns_except_gsc` 归一生成申请。

@@ -2,6 +2,7 @@
 Cloudflare注册商和DNS解析适配器
 """
 import requests
+import re
 from typing import Optional, List, Dict, Any
 from app.adapters.base import BaseRegistrarAdapter, BaseDnsProviderAdapter
 
@@ -261,6 +262,140 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
             return None
         except Exception:
             return None
+
+    def _request_json(self, method: str, url: str, **kwargs) -> Dict[str, Any]:
+        """发送 Cloudflare API 请求并返回 JSON，统一处理异常。"""
+        try:
+            response = requests.request(method, url, headers=self._get_headers(), timeout=10, **kwargs)
+            return response.json()
+        except Exception as e:
+            return {"success": False, "errors": [str(e)]}
+
+    def _get_redirect_ruleset(self, zone_id: str) -> Optional[Dict[str, Any]]:
+        """获取 URL Redirect Rules 的 zone phase entrypoint ruleset。"""
+        url = f"{self.base_url}/zones/{zone_id}/rulesets/phases/http_request_dynamic_redirect/entrypoint"
+        data = self._request_json("GET", url)
+        if data.get("success") and data.get("result"):
+            return data["result"]
+        return None
+
+    @staticmethod
+    def _escape_ruleset_string(value: str) -> str:
+        """转义 Cloudflare Ruleset 表达式中的字符串字面量。"""
+        return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+    @staticmethod
+    def _redirect_ref(status_code: int, host: str) -> str:
+        raw = f"dm_redirect_{status_code}_{host}".lower()
+        return re.sub(r"[^a-z0-9_]+", "_", raw).strip("_")[:120]
+
+    @staticmethod
+    def _serialize_ruleset_rule(rule: Dict[str, Any]) -> Dict[str, Any]:
+        """保留 Rulesets PUT 支持的规则字段，避免回传只读字段。"""
+        allowed_keys = {"id", "ref", "enabled", "expression", "description", "action", "action_parameters"}
+        return {key: value for key, value in rule.items() if key in allowed_keys and value is not None}
+
+    @staticmethod
+    def _normalize_redirect_target(value: str) -> str:
+        target = str(value or "").strip()
+        if not target:
+            return ""
+        if not target.startswith(("http://", "https://")):
+            target = f"https://{target}"
+        return target.rstrip("/")
+
+    def create_redirect_rule(
+        self,
+        domain: str,
+        host: str,
+        target: str,
+        status_code: int = 301,
+        preserve_path: bool = True,
+        preserve_query_string: bool = True,
+    ) -> Dict[str, Any]:
+        """创建或更新 Cloudflare Single Redirect 规则。"""
+        zone_id = self.get_zone_id(domain)
+        if not zone_id:
+            return {"success": False, "message": "无法获取Zone ID"}
+
+        status_code = 302 if int(status_code) == 302 else 301
+        source_host = domain if host in ("@", "") else f"{host}.{domain}"
+        target_base = self._normalize_redirect_target(target)
+        if not target_base:
+            return {"success": False, "message": "重定向目标为空"}
+
+        escaped_host = self._escape_ruleset_string(source_host)
+        escaped_target = self._escape_ruleset_string(target_base)
+        ref = self._redirect_ref(status_code, source_host)
+        target_url = (
+            {"expression": f'concat("{escaped_target}", http.request.uri.path)'}
+            if preserve_path else
+            {"value": target_base}
+        )
+        rule = {
+            "ref": ref,
+            "enabled": True,
+            "expression": f'http.host eq "{escaped_host}"',
+            "description": f"Domain Manager: {source_host} {status_code} redirect to {target_base}",
+            "action": "redirect",
+            "action_parameters": {
+                "from_value": {
+                    "target_url": target_url,
+                    "status_code": status_code,
+                    "preserve_query_string": preserve_query_string,
+                }
+            },
+        }
+
+        ruleset = self._get_redirect_ruleset(zone_id)
+        if not ruleset:
+            payload = {
+                "name": "Domain Manager Redirect Rules",
+                "kind": "zone",
+                "phase": "http_request_dynamic_redirect",
+                "rules": [rule],
+            }
+            data = self._request_json("POST", f"{self.base_url}/zones/{zone_id}/rulesets", json=payload)
+            if data.get("success"):
+                created = (data.get("result", {}).get("rules") or [{}])[-1]
+                return {"success": True, "record_id": created.get("id") or ref, "message": "重定向规则创建成功"}
+            return {"success": False, "message": f"创建重定向规则失败: {data.get('errors', [])}"}
+
+        existing_rules = ruleset.get("rules") or []
+        updated_rules = []
+        matched = False
+        for existing in existing_rules:
+            if existing.get("ref") == ref:
+                matched = True
+                existing_id = existing.get("id")
+                merged = {**rule}
+                if existing_id:
+                    merged["id"] = existing_id
+                updated_rules.append(merged)
+            else:
+                updated_rules.append(self._serialize_ruleset_rule(existing))
+        if not matched:
+            updated_rules.append(rule)
+
+        payload = {
+            "name": ruleset.get("name") or "Domain Manager Redirect Rules",
+            "description": ruleset.get("description", ""),
+            "kind": ruleset.get("kind") or "zone",
+            "phase": "http_request_dynamic_redirect",
+            "rules": updated_rules,
+        }
+        data = self._request_json(
+            "PUT",
+            f"{self.base_url}/zones/{zone_id}/rulesets/{ruleset.get('id')}",
+            json=payload,
+        )
+        if data.get("success"):
+            return {
+                "success": True,
+                "record_id": ref,
+                "message": "重定向规则更新成功" if matched else "重定向规则创建成功",
+            }
+        return {"success": False, "message": f"更新重定向规则失败: {data.get('errors', [])}"}
 
     def get_records(self, domain: str) -> List[Dict[str, Any]]:
         """获取域名的所有DNS记录"""

@@ -113,6 +113,7 @@ class ExecutionService:
 
         results: List[Dict[str, Any]] = []
         supported_types = {"A", "AAAA", "CNAME", "MX", "TXT", "NS", "SRV"}
+        redirect_types = {"REDIRECT_301": 301, "REDIRECT_302": 302}
         for rec in records:
             rtype = str(rec.get("record_type") or rec.get("type") or "").upper()
             host  = str(rec.get("host") or rec.get("name") or rec.get("hostname") or "@")
@@ -124,6 +125,27 @@ class ExecutionService:
 
             if not rtype or not value:
                 results.append({"record": label, "status": "failed", "message": "记录类型或记录值缺失"})
+                continue
+            if rtype in redirect_types:
+                if provider_code != "cloudflare" or not hasattr(adapter, "create_redirect_rule"):
+                    results.append({"record": label, "status": "failed", "message": f"{provider_code} 暂不支持自动创建重定向规则"})
+                    continue
+                try:
+                    r = adapter.create_redirect_rule(
+                        request.domain_name,
+                        host,
+                        value,
+                        status_code=redirect_types[rtype],
+                    )
+                except Exception as e:
+                    r = {"success": False, "message": f"创建重定向规则异常: {str(e)}"}
+                results.append({
+                    "record": label,
+                    "operation": "redirect_rule",
+                    "status": "success" if r.get("success") else "failed",
+                    "message": r.get("message", ""),
+                    "record_id": r.get("record_id"),
+                })
                 continue
             if rtype not in supported_types:
                 results.append({"record": label, "status": "failed", "message": f"暂不支持的 DNS 记录类型: {rtype}"})
