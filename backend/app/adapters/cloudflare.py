@@ -273,22 +273,9 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
 
     @staticmethod
     def _format_cloudflare_errors(errors: Any, fallback: str = "Cloudflare API 调用失败") -> str:
-        """将 Cloudflare API 错误转为业务人员可处理的提示。"""
+        """保留 Cloudflare API 原始错误，便于排查权限和接口问题。"""
         if not errors:
             return fallback
-        if isinstance(errors, list):
-            messages = []
-            for item in errors:
-                if isinstance(item, dict):
-                    code = item.get("code")
-                    message = item.get("message") or fallback
-                    if code == 10000 and "Authentication error" in str(message):
-                        messages.append("Cloudflare Token 缺少重定向规则权限，请增加 Dynamic URL Redirects Write，并确认包含当前 Zone")
-                    else:
-                        messages.append(str(message))
-                else:
-                    messages.append(str(item))
-            return "；".join(messages) or fallback
         return str(errors)
 
     def _get_redirect_ruleset(self, zone_id: str) -> Optional[Dict[str, Any]]:
