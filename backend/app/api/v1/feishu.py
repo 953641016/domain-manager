@@ -504,9 +504,8 @@ def _format_price_quote(quote: Optional[Dict[str, Any]]) -> str:
             return "价格获取失败"
         return message or "价格获取失败"
     if quote.get("available") is False:
-        if quote.get("message") == "domain_unavailable":
-            return "不可注册"
-        return quote.get("message") or "不可注册"
+        message = quote.get("message")
+        return f"不可注册（{message}）" if message else "不可注册"
     price = quote.get("price")
     currency = quote.get("currency") or "USD"
     if price is None:
