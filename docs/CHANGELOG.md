@@ -23,6 +23,7 @@
 
 ### 修复
 - **飞书文档主域名识别**（`backend/app/services/feishu_doc_parser.py`）：支持 `2、域名` 下一行填写主域名的文档格式，避免新需求文档提示“未能从文档中解析出主域名”。
+- **飞书文档 Clerk JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：兼容 `domainsRecords` 代码块中的 `host/type/value` 结构，和旧版表格、主机名/类型/目标值格式一起自动解析并去重。
 - **后端域名默认解析目标**（`backend/app/config.py`、`backend/.env.example`）：`backend_dns` 文档解析生成的后端接口域名 A 记录默认解析到 `54.89.199.228`。
 - **申请失败/拒绝日志可见**（`backend/app/services/execution_service.py`、`backend/app/schemas/request.py`、`frontend/src/pages/Requests/Detail.tsx`）：执行失败时从 DNS 单条记录中提取失败摘要写入申请与审计日志，后台申请详情展示失败日志和执行明细；后台拒绝申请的拒绝理由改为可选，填写后继续记录到申请详情。
 - **后台拒绝理由入口**（`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批区域直接展示“拒绝理由（可选）”输入框，拒绝按钮与输入框同屏显示，不再隐藏到弹窗中。

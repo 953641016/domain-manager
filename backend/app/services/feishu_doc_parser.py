@@ -319,8 +319,10 @@ class FeishuDocParser:
                         target = lookahead.split("：", 1)[-1].strip()
                 record = self._record(self._relative_host(host, domain), rtype, target, "clerk")
                 if record:
-                    records.append(record)
+                    self._append_record_once(records, record)
             idx += 1
+        for record in self._parse_json_like_records(section, domain, "clerk"):
+            self._append_record_once(records, record)
         return records
 
     def _parse_gsc(self, lines: List[str]) -> List[Dict[str, Any]]:
@@ -368,6 +370,45 @@ class FeishuDocParser:
             "provider_section": section,
             "ttl": 300,
         }
+
+    @staticmethod
+    def _append_record_once(records: List[Dict[str, Any]], record: Dict[str, Any]) -> None:
+        key = (
+            str(record.get("hostname", "")).lower().rstrip("."),
+            str(record.get("type", "")).upper(),
+            str(record.get("target", "")).lower().rstrip("."),
+        )
+        for existing in records:
+            existing_key = (
+                str(existing.get("hostname", "")).lower().rstrip("."),
+                str(existing.get("type", "")).upper(),
+                str(existing.get("target", "")).lower().rstrip("."),
+            )
+            if existing_key == key:
+                return
+        records.append(record)
+
+    def _parse_json_like_records(self, lines: List[str], domain: str, section: str) -> List[Dict[str, Any]]:
+        """兼容飞书代码块中的 domainsRecords: host/type/value 结构。"""
+        records: List[Dict[str, Any]] = []
+        current: Dict[str, str] = {}
+        field_map = {"host": "host", "hostname": "host", "type": "type", "value": "value", "target": "value"}
+        for line in lines:
+            match = re.search(r'["“”]?(host|hostname|type|value|target)["“”]?\s*[:：]\s*["“”]([^"“”]+)["“”]', line, flags=re.I)
+            if not match:
+                continue
+            current[field_map[match.group(1).lower()]] = match.group(2).strip()
+            if {"host", "type", "value"}.issubset(current.keys()):
+                record = self._record(
+                    self._relative_host(current["host"], domain),
+                    current["type"],
+                    current["value"],
+                    section,
+                )
+                if record:
+                    self._append_record_once(records, record)
+                current = {}
+        return records
 
     @staticmethod
     def _normalize_type(rtype: str) -> str:
