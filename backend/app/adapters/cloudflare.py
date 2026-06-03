@@ -271,6 +271,26 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
         except Exception as e:
             return {"success": False, "errors": [str(e)]}
 
+    @staticmethod
+    def _format_cloudflare_errors(errors: Any, fallback: str = "Cloudflare API 调用失败") -> str:
+        """将 Cloudflare API 错误转为业务人员可处理的提示。"""
+        if not errors:
+            return fallback
+        if isinstance(errors, list):
+            messages = []
+            for item in errors:
+                if isinstance(item, dict):
+                    code = item.get("code")
+                    message = item.get("message") or fallback
+                    if code == 10000 and "Authentication error" in str(message):
+                        messages.append("Cloudflare Token 缺少重定向规则权限，请增加 Dynamic URL Redirects Write，并确认包含当前 Zone")
+                    else:
+                        messages.append(str(message))
+                else:
+                    messages.append(str(item))
+            return "；".join(messages) or fallback
+        return str(errors)
+
     def _get_redirect_ruleset(self, zone_id: str) -> Optional[Dict[str, Any]]:
         """获取 URL Redirect Rules 的 zone phase entrypoint ruleset。"""
         url = f"{self.base_url}/zones/{zone_id}/rulesets/phases/http_request_dynamic_redirect/entrypoint"
@@ -359,7 +379,7 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
             if data.get("success"):
                 created = (data.get("result", {}).get("rules") or [{}])[-1]
                 return {"success": True, "record_id": created.get("id") or ref, "message": "重定向规则创建成功"}
-            return {"success": False, "message": f"创建重定向规则失败: {data.get('errors', [])}"}
+            return {"success": False, "message": f"创建重定向规则失败: {self._format_cloudflare_errors(data.get('errors'))}"}
 
         existing_rules = ruleset.get("rules") or []
         updated_rules = []
@@ -395,7 +415,7 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
                 "record_id": ref,
                 "message": "重定向规则更新成功" if matched else "重定向规则创建成功",
             }
-        return {"success": False, "message": f"更新重定向规则失败: {data.get('errors', [])}"}
+        return {"success": False, "message": f"更新重定向规则失败: {self._format_cloudflare_errors(data.get('errors'))}"}
 
     def get_records(self, domain: str) -> List[Dict[str, Any]]:
         """获取域名的所有DNS记录"""
