@@ -227,6 +227,11 @@ class FeishuDocParser:
                 candidate = FeishuDocParser._first_domain(lines[idx + 1])
                 if candidate:
                     return candidate
+        for idx, line in enumerate(lines):
+            if re.fullmatch(r"(?:\d+[、.])?\s*域名\s*", line) and idx + 1 < len(lines):
+                candidate = FeishuDocParser._first_domain(lines[idx + 1])
+                if candidate:
+                    return candidate
         return FeishuDocParser._first_domain(title) or ""
 
     @staticmethod

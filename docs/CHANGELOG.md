@@ -22,6 +22,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **飞书文档主域名识别**（`backend/app/services/feishu_doc_parser.py`）：支持 `2、域名` 下一行填写主域名的文档格式，避免新需求文档提示“未能从文档中解析出主域名”。
 - **后端域名默认解析目标**（`backend/app/config.py`、`backend/.env.example`）：`backend_dns` 文档解析生成的后端接口域名 A 记录默认解析到 `54.89.199.228`。
 - **申请失败/拒绝日志可见**（`backend/app/services/execution_service.py`、`backend/app/schemas/request.py`、`frontend/src/pages/Requests/Detail.tsx`）：执行失败时从 DNS 单条记录中提取失败摘要写入申请与审计日志，后台申请详情展示失败日志和执行明细；后台拒绝申请的拒绝理由改为可选，填写后继续记录到申请详情。
 - **后台拒绝理由入口**（`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批区域直接展示“拒绝理由（可选）”输入框，拒绝按钮与输入框同屏显示，不再隐藏到弹窗中。
