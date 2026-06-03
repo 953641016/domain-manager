@@ -331,19 +331,27 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
         if not target_base:
             return {"success": False, "message": "重定向目标为空"}
 
-        escaped_host = self._escape_ruleset_string(source_host)
-        escaped_target = self._escape_ruleset_string(target_base)
         ref = self._redirect_ref(status_code, source_host)
+        request_pattern = f"https://{source_host}/*"
+        target_pattern = f"{target_base}/${{1}}" if preserve_path else target_base
+        escaped_request_pattern = self._escape_ruleset_string(request_pattern)
+        escaped_target_pattern = self._escape_ruleset_string(target_pattern)
         target_url = (
-            {"expression": f'concat("{escaped_target}", http.request.uri.path)'}
+            {
+                "expression": (
+                    "wildcard_replace("
+                    f'http.request.full_uri, r"{escaped_request_pattern}", r"{escaped_target_pattern}"'
+                    ")"
+                )
+            }
             if preserve_path else
             {"value": target_base}
         )
         rule = {
             "ref": ref,
             "enabled": True,
-            "expression": f'http.host eq "{escaped_host}"',
-            "description": f"Domain Manager: {source_host} {status_code} redirect to {target_base}",
+            "expression": f'http.request.full_uri wildcard r"{escaped_request_pattern}"',
+            "description": f"Domain Manager: {request_pattern} {status_code} redirect to {target_pattern}",
             "action": "redirect",
             "action_parameters": {
                 "from_value": {

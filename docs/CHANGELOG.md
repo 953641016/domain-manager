@@ -26,6 +26,7 @@
 - **后台拒绝理由入口**（`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批区域直接展示“拒绝理由（可选）”输入框，拒绝按钮与输入框同屏显示，不再隐藏到弹窗中。
 - **失败飞书卡片原因展示**（`backend/app/services/execution_service.py`）：申请执行失败时，发送给申请人和审批人的飞书结果卡片统一展示失败原因，DNS 失败会显示单条记录失败摘要。
 - **Cloudflare 原始错误保留**（`backend/app/adapters/cloudflare.py`）：Cloudflare 重定向规则接口失败时保留原始 `errors` 内容，便于根据官方错误码和消息排查权限或接口问题。
+- **Cloudflare 通配符重定向格式**（`backend/app/adapters/cloudflare.py`）：Single Redirect 规则改为通配符模式，生成 `https://www.domain/*` → `https://domain/${1}`，并保留查询字符串，和 Cloudflare 控制台截图配置保持一致。
 - **后台申请审批 DNS账号推断**（`backend/app/api/v1/requests.py`、`backend/app/services/execution_service.py`）：后台 `/requests` 页面批准 DNS 申请时，若未显式选择 DNS账号，会按本地域名绑定、同域名历史成功申请、当前用户默认 DNS账号自动补齐；DNS 执行成功后回填域名与 DNS账号绑定，避免后台审批执行时报“未配置DNS解析账号或解析商”。
 - **超管审批卡片超时**（`backend/app/api/v1/feishu.py`）：账号配置/用户管理等超管审批卡片点击授权或拒绝后先快速响应飞书，再后台执行写库与结果通知，避免卡片弹出 `200341` 超时错误。
 - **飞书卡片审批超时**（`backend/app/api/v1/feishu.py`）：文档按钮/DNS 审批卡片点击批准后先在 3 秒内返回交互响应，再由后台线程执行域名购买或 DNS 解析，避免执行已成功但飞书客户端弹出 `200341` 超时错误。
