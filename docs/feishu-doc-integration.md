@@ -283,7 +283,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 - `doc_format` 默认 `standard_v1`：兼容当前两类文档格式。
 - `applicant_feishu_id` 必填：可传飞书 `open_id` / `user_id`，也可传公司内唯一姓名；后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - `source` 可选：默认 `feishu_doc_button`，建议多维表格按钮传 `feishu_bitable_button`，方便审计来源。
-- 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供。
+- 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供，当前默认值为 `54.89.199.228`。
 
 ### 请求字段说明
 

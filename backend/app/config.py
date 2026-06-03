@@ -40,7 +40,7 @@ class Config:
     SUPER_ADMIN_FEISHU_USER_ID = os.getenv("SUPER_ADMIN_FEISHU_USER_ID", "")
     FEISHU_DOC_APP_ID = os.getenv("FEISHU_DOC_APP_ID", FEISHU_APP_ID)
     FEISHU_DOC_APP_SECRET = os.getenv("FEISHU_DOC_APP_SECRET", FEISHU_APP_SECRET)
-    BACKEND_DNS_DEFAULT_TARGET = os.getenv("BACKEND_DNS_DEFAULT_TARGET", "")
+    BACKEND_DNS_DEFAULT_TARGET = os.getenv("BACKEND_DNS_DEFAULT_TARGET", "54.89.199.228")
 
     # --------------------------------------------------------------------------
     # Cloudflare 配置
