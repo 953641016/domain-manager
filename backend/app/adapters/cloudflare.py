@@ -62,18 +62,29 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
                 "check_successful": False
             }
 
-    def register_domain(self, domain: str, registrant_info: Dict[str, Any], nameservers: Optional[List[str]] = None) -> Dict[str, Any]:
+    def register_domain(
+        self,
+        domain: str,
+        registrant_info: Dict[str, Any],
+        nameservers: Optional[List[str]] = None,
+        years: int = 1,
+    ) -> Dict[str, Any]:
         """注册域名"""
-        url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains"
+        if years != 1:
+            return {
+                "success": False,
+                "domain": domain,
+                "message": "Cloudflare Registrar API currently only supports the default 1-year registration flow"
+            }
+
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/registrations"
 
         payload = {
-            "domain": domain,
-            "contacts": {
-                "registrant": registrant_info,
-                "admin": registrant_info,
-                "tech": registrant_info
-            }
+            "domain_name": domain
         }
+
+        if registrant_info:
+            payload["contacts"] = {"registrant": registrant_info}
 
         if nameservers:
             payload["nameservers"] = nameservers
@@ -84,13 +95,14 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
 
             if data.get("success"):
                 result = data.get("result", {})
+                registration = ((result.get("context") or {}).get("registration") or {})
                 return {
                     "success": True,
                     "domain": domain,
-                    "order_id": result.get("order_id"),
-                    "registration_date": result.get("registration_date"),
-                    "expiration_date": result.get("expiration_date"),
-                    "message": "注册成功"
+                    "order_id": result.get("id") or result.get("workflow_id"),
+                    "registration_date": registration.get("created_at") or result.get("created_at"),
+                    "expiration_date": registration.get("expires_at") or result.get("expires_at"),
+                    "message": "注册成功" if result.get("completed", True) else "注册已提交，等待 Cloudflare 完成"
                 }
             else:
                 errors = data.get("errors", [])

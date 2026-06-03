@@ -251,20 +251,33 @@ class ExecutionService:
             avail = adapter.check_domain_availability(domain) or {}
         except Exception as e:
             logger.warning("注册前可用性检查异常: %s", e)
-        if avail.get("check_successful") and avail.get("available") is False:
+        if not avail.get("check_successful"):
             return {
                 "success": False,
-                "error": "域名当前已被注册，无法继续注册",
+                "error": f"注册前可用性检查失败: {avail.get('message') or '检查失败'}",
+                "reg_account_name": account.name,
+            }
+        if avail.get("check_successful") and avail.get("available") is False:
+            reason = avail.get("message") or "不可注册"
+            return {
+                "success": False,
+                "error": f"域名当前不可注册: {reason}",
                 "price": avail.get("price"),
                 "currency": avail.get("currency"),
+                "reg_account_name": account.name,
             }
 
         # 2. 执行注册
         registrant = {}
+        register_years = 1
         if isinstance(request.request_data, dict):
             registrant = request.request_data.get("registrant") or request.request_data.get("registrant_info") or {}
+            try:
+                register_years = int(request.request_data.get("register_years") or 1)
+            except (TypeError, ValueError):
+                register_years = 1
         try:
-            reg = adapter.register_domain(domain, registrant, nameservers=None)
+            reg = adapter.register_domain(domain, registrant, nameservers=None, years=register_years)
         except Exception as e:
             return {"success": False, "error": f"调用注册API异常: {str(e)}"}
 

@@ -33,7 +33,13 @@ class BaseRegistrarAdapter(ABC):
         pass
 
     @abstractmethod
-    def register_domain(self, domain: str, registrant_info: Dict[str, Any], nameservers: Optional[List[str]] = None) -> Dict[str, Any]:
+    def register_domain(
+        self,
+        domain: str,
+        registrant_info: Dict[str, Any],
+        nameservers: Optional[List[str]] = None,
+        years: int = 1,
+    ) -> Dict[str, Any]:
         """
         注册域名
 
@@ -41,6 +47,7 @@ class BaseRegistrarAdapter(ABC):
             domain: 域名名称
             registrant_info: 注册人信息
             nameservers: NS服务器列表
+            years: 注册年限
 
         Returns:
             {

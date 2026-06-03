@@ -1,8 +1,10 @@
 ﻿"""
 GoDaddy注册商适配器
 """
-import requests
+from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
+
+import requests
 from app.adapters.base import BaseRegistrarAdapter
 
 
@@ -22,6 +24,18 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
             "Accept": "application/json"
         }
 
+    def _format_api_error(self, data: Any, fallback: str) -> str:
+        if isinstance(data, dict):
+            code = data.get("code")
+            message = data.get("message") or data.get("detail")
+            if code and message:
+                return f"{code}: {message}"
+            if message:
+                return str(message)
+            if code:
+                return str(code)
+        return fallback
+
     def check_domain_availability(self, domain: str) -> Dict[str, Any]:
         """检查域名是否可注册"""
         url = f"{self.base_url}/domains/available"
@@ -32,20 +46,22 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
             response = requests.get(url, headers=self._get_headers(), params=params, timeout=self.timeout)
             data = response.json()
 
-            if "available" in data:
+            if response.status_code == 200 and "available" in data:
+                price = data.get("price")
                 return {
                     "available": data.get("available", False),
                     "domain": domain,
-                    "price": data.get("price", 0) / 1000000,  # GoDaddy价格单位是百万分之一美元
-                    "currency": "USD",
+                    "price": price / 1000000 if price is not None else None,
+                    "currency": data.get("currency") or "USD",
                     "message": data.get("message", ""),
+                    "period": data.get("period"),
                     "check_successful": True
                 }
             else:
                 return {
                     "available": None,
                     "domain": domain,
-                    "message": "检查失败",
+                    "message": self._format_api_error(data, "检查失败"),
                     "check_successful": False
                 }
         except Exception as e:
@@ -56,25 +72,43 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
                 "check_successful": False
             }
 
-    def register_domain(self, domain: str, registrant_info: Dict[str, Any], nameservers: Optional[List[str]] = None) -> Dict[str, Any]:
+    def register_domain(
+        self,
+        domain: str,
+        registrant_info: Dict[str, Any],
+        nameservers: Optional[List[str]] = None,
+        years: int = 1,
+    ) -> Dict[str, Any]:
         """注册域名"""
         url = f"{self.base_url}/domains/purchase"
+        registrant_info = registrant_info or {}
+        agreed_by = (
+            registrant_info.get("agreedBy")
+            or registrant_info.get("agreed_by")
+            or registrant_info.get("client_ip")
+            or "127.0.0.1"
+        )
 
         payload = {
             "domain": domain,
             "consent": {
-                "agreedAt": "2024-01-01T00:00:00Z",
-                "agreedBy": "0.0.0.0",
-                "agreementKeys": ["DNRA"]
+                "agreedAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+                "agreedBy": agreed_by,
+                "agreementKeys": registrant_info.get("agreementKeys") or registrant_info.get("agreement_keys") or ["DNRA"]
             },
-            "contactAdmin": registrant_info,
-            "contactBilling": registrant_info,
-            "contactRegistrant": registrant_info,
-            "contactTech": registrant_info,
-            "period": 1,
+            "period": max(1, min(int(years or 1), 10)),
             "privacy": False,
             "renewAuto": False
         }
+
+        contact_info = {k: v for k, v in registrant_info.items() if k not in {"agreedBy", "agreed_by", "client_ip", "agreementKeys", "agreement_keys"}}
+        if contact_info:
+            payload.update({
+                "contactAdmin": contact_info,
+                "contactBilling": contact_info,
+                "contactRegistrant": contact_info,
+                "contactTech": contact_info,
+            })
 
         if nameservers:
             payload["nameServers"] = nameservers
@@ -96,7 +130,7 @@ class GoDaddyRegistrarAdapter(BaseRegistrarAdapter):
                 return {
                     "success": False,
                     "domain": domain,
-                    "message": f"注册失败: {data.get('message', '未知错误')}"
+                    "message": f"注册失败: {self._format_api_error(data, '未知错误')}"
                 }
         except Exception as e:
             return {

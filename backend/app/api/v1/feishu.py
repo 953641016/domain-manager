@@ -496,12 +496,6 @@ def _format_price_quote(quote: Optional[Dict[str, Any]]) -> str:
         return "价格获取失败"
     if not quote.get("check_successful"):
         message = quote.get("message") or ""
-        if "Network is unreachable" in message or "Failed to establish a new connection" in message:
-            return "价格获取失败：网络不可达"
-        if "timeout" in message.lower() or "timed out" in message.lower():
-            return "价格获取失败：接口超时"
-        if len(message) > 40:
-            return "价格获取失败"
         return message or "价格获取失败"
     if quote.get("available") is False:
         message = quote.get("message")
@@ -1517,6 +1511,8 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
                 return {"toast": {"type": "error", "content": "无权使用该注册账号"}}
             selected_quotes = _quote_reg_account_prices(db, req.domain_name, [account])
             selected_quote = selected_quotes.get(str(account.id)) or {}
+            if not selected_quote.get("check_successful"):
+                return {"toast": {"type": "error", "content": f"所选服务商查价失败：{selected_quote.get('message') or '检查失败'}"}}
             if selected_quote.get("check_successful") and selected_quote.get("available") is False:
                 return {"toast": {"type": "error", "content": f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}"}}
             req.selected_reg_account_id = account.id
