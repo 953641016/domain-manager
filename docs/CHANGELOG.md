@@ -22,6 +22,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 
 ### 修复
+- **域名页 DNS 操作**（`frontend/src/pages/Domains/index.tsx`、`frontend/src/pages/Domains/Detail.tsx`）：域名列表 DNS 按钮改为跳转详情页 DNS 区域，避免 `/dns` 未配置路由导致 404；详情页“查看 DNS 记录”按钮接入 `/api/v1/dns/domain/{domain_id}` 并展示记录列表。
 - **域名购买报价原始原因展示**（`backend/app/api/v1/feishu.py`）：注册商返回域名不可注册时，飞书审批卡片报价保留原始 `message`（如 `domain_unavailable`），方便审核人员快速定位问题。
 - **飞书文档主域名识别**（`backend/app/services/feishu_doc_parser.py`）：支持 `2、域名` 下一行填写主域名的文档格式，避免新需求文档提示“未能从文档中解析出主域名”。
 - **飞书文档 Clerk JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：兼容 `domainsRecords` 代码块中的 `host/type/value` 结构，和旧版表格、主机名/类型/目标值格式一起自动解析并去重。

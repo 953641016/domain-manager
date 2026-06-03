@@ -179,7 +179,7 @@ export default function DomainsPage() {
                           详情
                         </button>
                         <button
-                          onClick={() => navigate(`/dns?domain_id=${domain.id}`)}
+                          onClick={() => navigate(`/domains/${domain.name}?tab=dns`)}
                           className="text-green-600 hover:text-green-800"
                         >
                           DNS
@@ -226,7 +226,7 @@ export default function DomainsPage() {
                         详情
                       </button>
                       <button
-                        onClick={() => navigate(`/dns?domain_id=${domain.id}`)}
+                        onClick={() => navigate(`/domains/${domain.name}?tab=dns`)}
                         className="px-2 py-1 text-xs text-green-600 border border-green-300 rounded hover:bg-green-50"
                       >
                         DNS
