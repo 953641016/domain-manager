@@ -53,6 +53,9 @@ def get_audit_logs(
     action: Optional[str] = Query(None, description="操作类型"),
     resource_type: Optional[str] = Query(None, description="资源类型"),
     status_filter: Optional[str] = Query(None, alias="status", description="状态"),
+    actor_type: Optional[str] = Query(None, description="操作来源：user/system"),
+    keyword: Optional[str] = Query(None, description="关键词，匹配操作、资源、用户、错误信息"),
+    user_keyword: Optional[str] = Query(None, description="用户关键词，匹配用户姓名或ID"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
     current_user: User = Depends(require_view_audit),
@@ -67,6 +70,9 @@ def get_audit_logs(
         action=action,
         resource_type=resource_type,
         status=status_filter,
+        actor_type=actor_type,
+        keyword=keyword,
+        user_keyword=user_keyword,
         start_time=start_time,
         end_time=end_time
     )
@@ -75,6 +81,9 @@ def get_audit_logs(
         action=action,
         resource_type=resource_type,
         status=status_filter,
+        actor_type=actor_type,
+        keyword=keyword,
+        user_keyword=user_keyword,
         start_time=start_time,
         end_time=end_time
     )

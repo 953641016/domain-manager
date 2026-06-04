@@ -21,13 +21,26 @@ export default function LogsPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
+  const [actorTypeFilter, setActorTypeFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [resourceTypeFilter, setResourceTypeFilter] = useState('');
+  const [keyword, setKeyword] = useState('');
+  const [userKeyword, setUserKeyword] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const pageSize = 20;
 
   useEffect(() => {
     fetchLogs();
-  }, [page, actionFilter, resourceTypeFilter]);
+  }, [page, actorTypeFilter, actionFilter, resourceTypeFilter, keyword, userKeyword, startDate, endDate]);
+
+  const resetPage = (setter: (value: string) => void, value: string) => {
+    setter(value);
+    setPage(1);
+  };
+
+  const startTime = startDate ? `${startDate}T00:00:00` : undefined;
+  const endTime = endDate ? `${endDate}T23:59:59` : undefined;
 
   const fetchLogs = async () => {
     try {
@@ -36,8 +49,13 @@ export default function LogsPage() {
         params: {
           skip: (page - 1) * pageSize,
           limit: pageSize,
+          actor_type: actorTypeFilter || undefined,
           action: actionFilter || undefined,
-          resource_type: resourceTypeFilter || undefined
+          resource_type: resourceTypeFilter || undefined,
+          keyword: keyword || undefined,
+          user_keyword: userKeyword || undefined,
+          start_time: startTime,
+          end_time: endTime
         }
       });
       setLogs(response.data.items || []);
@@ -50,6 +68,17 @@ export default function LogsPage() {
   };
 
   const formatDate = (dateStr: string) => formatDateTime(dateStr);
+
+  const clearFilters = () => {
+    setActorTypeFilter('');
+    setActionFilter('');
+    setResourceTypeFilter('');
+    setKeyword('');
+    setUserKeyword('');
+    setStartDate('');
+    setEndDate('');
+    setPage(1);
+  };
 
   const getStatusBadge = (status: string) => {
     return status === 'success' ? (
@@ -73,12 +102,21 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <h1 className="text-2xl font-bold text-gray-800">审计日志</h1>
-        <div className="flex items-center space-x-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-2">
+          <select
+            value={actorTypeFilter}
+            onChange={(e) => resetPage(setActorTypeFilter, e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md"
+          >
+            <option value="">全部类型</option>
+            <option value="user">用户操作</option>
+            <option value="system">系统任务</option>
+          </select>
           <select
             value={actionFilter}
-            onChange={(e) => setActionFilter(e.target.value)}
+            onChange={(e) => resetPage(setActionFilter, e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md"
           >
             <option value="">全部操作</option>
@@ -89,7 +127,7 @@ export default function LogsPage() {
           </select>
           <select
             value={resourceTypeFilter}
-            onChange={(e) => setResourceTypeFilter(e.target.value)}
+            onChange={(e) => resetPage(setResourceTypeFilter, e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md"
           >
             <option value="">全部资源</option>
@@ -98,6 +136,40 @@ export default function LogsPage() {
             <option value="request">申请</option>
             <option value="user">用户</option>
           </select>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => resetPage(setStartDate, e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md"
+            title="开始日期"
+          />
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => resetPage(setEndDate, e.target.value)}
+            className="px-3 py-2 border border-gray-300 rounded-md"
+            title="结束日期"
+          />
+          <input
+            type="text"
+            value={keyword}
+            onChange={(e) => resetPage(setKeyword, e.target.value)}
+            placeholder="关键词"
+            className="px-3 py-2 border border-gray-300 rounded-md"
+          />
+          <input
+            type="text"
+            value={userKeyword}
+            onChange={(e) => resetPage(setUserKeyword, e.target.value)}
+            placeholder="用户"
+            className="px-3 py-2 border border-gray-300 rounded-md"
+          />
+          <button
+            onClick={clearFilters}
+            className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+          >
+            清空
+          </button>
         </div>
       </div>
 

@@ -4,7 +4,7 @@
 from typing import Optional, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, or_, cast, String
 from app.models.audit import AuditLog
 
 
@@ -63,6 +63,9 @@ class AuditService:
         action: Optional[str] = None,
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
+        actor_type: Optional[str] = None,
+        keyword: Optional[str] = None,
+        user_keyword: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ):
@@ -78,6 +81,32 @@ class AuditService:
             query = query.filter(AuditLog.resource_type == resource_type)
         if status:
             query = query.filter(AuditLog.status == status)
+        if actor_type == "system":
+            query = query.filter(AuditLog.user_id.is_(None), AuditLog.user_name == "系统任务")
+        elif actor_type == "user":
+            query = query.filter(
+                or_(AuditLog.user_id.isnot(None), AuditLog.user_name != "系统任务")
+            )
+        if user_keyword:
+            pattern = f"%{user_keyword}%"
+            query = query.filter(
+                or_(
+                    AuditLog.user_name.ilike(pattern),
+                    cast(AuditLog.user_id, String).ilike(pattern),
+                )
+            )
+        if keyword:
+            pattern = f"%{keyword}%"
+            query = query.filter(
+                or_(
+                    AuditLog.action.ilike(pattern),
+                    AuditLog.resource_type.ilike(pattern),
+                    AuditLog.resource_id.ilike(pattern),
+                    AuditLog.resource_name.ilike(pattern),
+                    AuditLog.user_name.ilike(pattern),
+                    AuditLog.error_message.ilike(pattern),
+                )
+            )
         if start_time:
             query = query.filter(AuditLog.created_at >= start_time)
         if end_time:
@@ -91,6 +120,9 @@ class AuditService:
         action: Optional[str] = None,
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
+        actor_type: Optional[str] = None,
+        keyword: Optional[str] = None,
+        user_keyword: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         skip: int = 0,
@@ -103,6 +135,9 @@ class AuditService:
             action=action,
             resource_type=resource_type,
             status=status,
+            actor_type=actor_type,
+            keyword=keyword,
+            user_keyword=user_keyword,
             start_time=start_time,
             end_time=end_time,
         )
@@ -117,6 +152,9 @@ class AuditService:
         action: Optional[str] = None,
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
+        actor_type: Optional[str] = None,
+        keyword: Optional[str] = None,
+        user_keyword: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> int:
@@ -127,6 +165,9 @@ class AuditService:
             action=action,
             resource_type=resource_type,
             status=status,
+            actor_type=actor_type,
+            keyword=keyword,
+            user_keyword=user_keyword,
             start_time=start_time,
             end_time=end_time,
         )
