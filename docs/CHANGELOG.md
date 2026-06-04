@@ -23,6 +23,7 @@
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
 - **统计/审计权限收口**（`backend/app/models/permission.py`、`backend/app/api/v1/audit.py`、`frontend/src/App.tsx`）：按权限规划允许域名专员访问统计报表和操作日志；后端审计接口改为 `can_view_audit` / `can_view_statistics` 权限，并对域名专员仅返回本人及归属业务人员相关数据。
 - **系统任务审计展示**（`backend/app/services/audit_service.py`）：系统定时任务写入审计日志时若无人工操作人，用户列统一显示为“系统任务”，避免后台日志列表出现空用户。
+- **系统同步日志资源名**（`backend/app/tasks/scheduler.py`）：域名状态同步和 DNS 记录同步日志写入真实成功/失败数量，资源列显示如“DNS记录同步: 成功 4 / 失败 0”，不再显示空资源名。
 
 ### 修复
 - **系统管理员申请详情只读**（`backend/app/api/v1/requests.py`、`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批操作区仅域名专员和超级管理员可见；审批、拒绝、更新申请接口同步收紧为域名专员/超管角色，系统管理员只能查看申请信息。

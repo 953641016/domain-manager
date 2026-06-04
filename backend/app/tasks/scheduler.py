@@ -192,6 +192,7 @@ class TaskScheduler:
             audit_service.log(
                 action="sync_domains",
                 resource_type="domain",
+                resource_name=f"域名状态同步: 成功 {synced_count} / 失败 {failed_count}",
                 after_state={"synced": synced_count, "failed": failed_count},
                 status="success" if failed_count == 0 else "failed"
             )
@@ -205,6 +206,7 @@ class TaskScheduler:
             audit_service.log(
                 action="sync_domains",
                 resource_type="domain",
+                resource_name="域名状态同步: 成功 0 / 失败 1",
                 status="failed",
                 error_message=str(e)
             )
@@ -267,6 +269,7 @@ class TaskScheduler:
             audit_service.log(
                 action="sync_dns",
                 resource_type="dns_record",
+                resource_name=f"DNS记录同步: 成功 {synced_count} / 失败 {failed_count}",
                 after_state={"synced": synced_count, "failed": failed_count},
                 status="success" if failed_count == 0 else "failed"
             )
@@ -280,6 +283,7 @@ class TaskScheduler:
             audit_service.log(
                 action="sync_dns",
                 resource_type="dns_record",
+                resource_name="DNS记录同步: 成功 0 / 失败 1",
                 status="failed",
                 error_message=str(e)
             )
