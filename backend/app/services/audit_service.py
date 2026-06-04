@@ -31,6 +31,9 @@ class AuditService:
         status: str = "success",
         error_message: Optional[str] = None
     ) -> AuditLog:
+        if not user_id and not user_name:
+            user_name = "系统任务"
+
         log = AuditLog(
             action=action,
             resource_type=resource_type,
