@@ -9,7 +9,7 @@ from app.models.audit import AuditLog
 
 
 class AuditService:
-    """审计日志服务类"""
+    """审计日志服务"""
 
     def __init__(self, db: Session):
         self.db = db
@@ -31,9 +31,6 @@ class AuditService:
         status: str = "success",
         error_message: Optional[str] = None
     ) -> AuditLog:
-        """
-        记录审计日志
-        """
         log = AuditLog(
             action=action,
             resource_type=resource_type,
@@ -55,9 +52,39 @@ class AuditService:
         self.db.refresh(log)
         return log
 
+    def _apply_filters(
+        self,
+        query,
+        user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
+        action: Optional[str] = None,
+        resource_type: Optional[str] = None,
+        status: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+    ):
+        if user_ids is not None:
+            if not user_ids:
+                return None
+            query = query.filter(AuditLog.user_id.in_(user_ids))
+        elif user_id:
+            query = query.filter(AuditLog.user_id == user_id)
+        if action:
+            query = query.filter(AuditLog.action == action)
+        if resource_type:
+            query = query.filter(AuditLog.resource_type == resource_type)
+        if status:
+            query = query.filter(AuditLog.status == status)
+        if start_time:
+            query = query.filter(AuditLog.created_at >= start_time)
+        if end_time:
+            query = query.filter(AuditLog.created_at <= end_time)
+        return query
+
     def get_logs(
         self,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         action: Optional[str] = None,
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
@@ -66,88 +93,78 @@ class AuditService:
         skip: int = 0,
         limit: int = 100
     ) -> List[AuditLog]:
-        """获取审计日志列表"""
-        query = self.db.query(AuditLog)
-
-        if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
-        if action:
-            query = query.filter(AuditLog.action == action)
-        if resource_type:
-            query = query.filter(AuditLog.resource_type == resource_type)
-        if status:
-            query = query.filter(AuditLog.status == status)
-        if start_time:
-            query = query.filter(AuditLog.created_at >= start_time)
-        if end_time:
-            query = query.filter(AuditLog.created_at <= end_time)
-
+        query = self._apply_filters(
+            self.db.query(AuditLog),
+            user_id=user_id,
+            user_ids=user_ids,
+            action=action,
+            resource_type=resource_type,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        if query is None:
+            return []
         return query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit).all()
 
     def get_log_count(
         self,
         user_id: Optional[int] = None,
+        user_ids: Optional[List[int]] = None,
         action: Optional[str] = None,
         resource_type: Optional[str] = None,
         status: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> int:
-        """获取审计日志总数"""
-        query = self.db.query(AuditLog)
-
-        if user_id:
-            query = query.filter(AuditLog.user_id == user_id)
-        if action:
-            query = query.filter(AuditLog.action == action)
-        if resource_type:
-            query = query.filter(AuditLog.resource_type == resource_type)
-        if status:
-            query = query.filter(AuditLog.status == status)
-        if start_time:
-            query = query.filter(AuditLog.created_at >= start_time)
-        if end_time:
-            query = query.filter(AuditLog.created_at <= end_time)
-
-        return query.count()
+        query = self._apply_filters(
+            self.db.query(AuditLog),
+            user_id=user_id,
+            user_ids=user_ids,
+            action=action,
+            resource_type=resource_type,
+            status=status,
+            start_time=start_time,
+            end_time=end_time,
+        )
+        return 0 if query is None else query.count()
 
     def get_log(self, log_id: int) -> Optional[AuditLog]:
-        """获取审计日志详情"""
         return self.db.query(AuditLog).filter(AuditLog.id == log_id).first()
 
-    def get_stats(self) -> dict:
-        """获取审计日志统计"""
-        total = self.db.query(AuditLog).count()
-        success = self.db.query(AuditLog).filter(AuditLog.status == "success").count()
-        failed = self.db.query(AuditLog).filter(AuditLog.status == "failed").count()
-        
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_count = self.db.query(AuditLog).filter(AuditLog.created_at >= today).count()
+    def get_stats(self, user_ids: Optional[List[int]] = None) -> dict:
+        query = self._apply_filters(self.db.query(AuditLog), user_ids=user_ids)
+        if query is None:
+            return {"total": 0, "success": 0, "failed": 0, "today": 0}
 
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         return {
-            "total": total,
-            "success": success,
-            "failed": failed,
-            "today": today_count
+            "total": query.count(),
+            "success": query.filter(AuditLog.status == "success").count(),
+            "failed": query.filter(AuditLog.status == "failed").count(),
+            "today": query.filter(AuditLog.created_at >= today).count(),
         }
 
-    def get_recent_logs(self, limit: int = 10) -> List[AuditLog]:
-        """获取最近的审计日志"""
-        return self.db.query(AuditLog).order_by(
-            AuditLog.created_at.desc()
-        ).limit(limit).all()
+    def get_recent_logs(self, limit: int = 10, user_ids: Optional[List[int]] = None) -> List[AuditLog]:
+        query = self._apply_filters(self.db.query(AuditLog), user_ids=user_ids)
+        if query is None:
+            return []
+        return query.order_by(AuditLog.created_at.desc()).limit(limit).all()
 
-    def get_user_action_summary(self, days: int = 30) -> List[dict]:
-        """获取用户操作统计"""
+    def get_user_action_summary(self, days: int = 30, user_ids: Optional[List[int]] = None) -> List[dict]:
         start_date = datetime.now() - timedelta(days=days)
-        
-        results = self.db.query(
+        query = self.db.query(
             AuditLog.user_id,
             AuditLog.user_name,
             func.count(AuditLog.id).label("count")
-        ).filter(
-            AuditLog.created_at >= start_date
-        ).group_by(
+        ).filter(AuditLog.created_at >= start_date)
+
+        if user_ids is not None:
+            if not user_ids:
+                return []
+            query = query.filter(AuditLog.user_id.in_(user_ids))
+
+        results = query.group_by(
             AuditLog.user_id,
             AuditLog.user_name
         ).order_by(
@@ -155,17 +172,12 @@ class AuditService:
         ).limit(10).all()
 
         return [
-            {"user_id": r.user_id, "user_name": r.user_name, "count": r.count}
-            for r in results
+            {"user_id": row.user_id, "user_name": row.user_name, "count": row.count}
+            for row in results
         ]
 
     def cleanup_old_logs(self, days: int = 90) -> int:
-        """清理旧的审计日志"""
         cutoff_date = datetime.now() - timedelta(days=days)
-        
-        deleted = self.db.query(AuditLog).filter(
-            AuditLog.created_at < cutoff_date
-        ).delete()
-        
+        deleted = self.db.query(AuditLog).filter(AuditLog.created_at < cutoff_date).delete()
         self.db.commit()
         return deleted

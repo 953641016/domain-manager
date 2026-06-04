@@ -1,12 +1,18 @@
 """
-审计日志API路由
+审计日志 API 路由。
+
+权限说明：
+- 查询类路由需要 can_view_audit / can_view_statistics。
+- domain_spec 仅返回本人及归属业务人员相关数据；admin/super_admin 返回全局数据。
+- 清理日志是写操作，仅 admin/super_admin 可用。
+- 返回格式：列表接口返回对象 {total, items}，统计接口返回对象。
 """
 from typing import Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.core.database import get_db
-from app.api.dependencies import require_admin
+from app.api.dependencies import require_admin, require_view_audit, require_view_statistics
 from app.services.audit_service import AuditService
 from app.schemas.audit import AuditLogResponse, AuditLogListResponse, AuditLogStatsResponse
 from app.models.user import User
@@ -15,6 +21,28 @@ router = APIRouter(
     prefix="/audit",
     tags=["审计日志"],
 )
+
+
+def _get_specialist_scope_ids(db: Session, specialist_id: int) -> list[int]:
+    rows = db.query(User.id).filter(User.assigned_specialist_id == specialist_id).all()
+    ids = [row.id for row in rows]
+    ids.append(specialist_id)
+    return ids
+
+
+def _get_audit_scope_user_ids(
+    db: Session,
+    current_user: User,
+    user_id: Optional[int] = None,
+) -> Optional[list[int]]:
+    if current_user.role in ("admin", "super_admin"):
+        return [user_id] if user_id else None
+    if current_user.role == "domain_spec":
+        scope_ids = _get_specialist_scope_ids(db, current_user.id)
+        if user_id:
+            return [user_id] if user_id in scope_ids else []
+        return scope_ids
+    return [current_user.id]
 
 
 @router.get("/logs", response_model=AuditLogListResponse)
@@ -27,19 +55,15 @@ def get_audit_logs(
     status_filter: Optional[str] = Query(None, alias="status", description="状态"),
     start_time: Optional[datetime] = Query(None, description="开始时间"),
     end_time: Optional[datetime] = Query(None, description="结束时间"),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_view_audit),
     db: Session = Depends(get_db),
 ):
-    """
-    获取审计日志列表
-
-    需要管理员权限
-    """
     service = AuditService(db)
+    user_ids = _get_audit_scope_user_ids(db, current_user, user_id)
     logs = service.get_logs(
         skip=skip,
         limit=limit,
-        user_id=user_id,
+        user_ids=user_ids,
         action=action,
         resource_type=resource_type,
         status=status_filter,
@@ -47,7 +71,7 @@ def get_audit_logs(
         end_time=end_time
     )
     total = service.get_log_count(
-        user_id=user_id,
+        user_ids=user_ids,
         action=action,
         resource_type=resource_type,
         status=status_filter,
@@ -57,58 +81,47 @@ def get_audit_logs(
 
     return AuditLogListResponse(
         total=total,
-        items=[AuditLogResponse.model_validate(l) for l in logs]
+        items=[AuditLogResponse.model_validate(log) for log in logs]
     )
 
 
 @router.get("/stats", response_model=AuditLogStatsResponse)
 def get_audit_stats(
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_view_statistics),
     db: Session = Depends(get_db),
 ):
-    """
-    获取审计日志统计
-
-    需要管理员权限
-    """
     service = AuditService(db)
-    stats = service.get_stats()
+    stats = service.get_stats(user_ids=_get_audit_scope_user_ids(db, current_user))
     return AuditLogStatsResponse(**stats)
 
 
 @router.get("/recent")
 def get_recent_logs(
     limit: int = Query(10, ge=1, le=100, description="返回数量"),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_view_audit),
     db: Session = Depends(get_db),
 ):
-    """
-    获取最近的审计日志
-
-    需要管理员权限
-    """
     service = AuditService(db)
-    logs = service.get_recent_logs(limit)
-
+    logs = service.get_recent_logs(
+        limit,
+        user_ids=_get_audit_scope_user_ids(db, current_user),
+    )
     return {
-        "items": [AuditLogResponse.model_validate(l) for l in logs]
+        "items": [AuditLogResponse.model_validate(log) for log in logs]
     }
 
 
 @router.get("/user-summary")
 def get_user_action_summary(
     days: int = Query(30, ge=1, le=365, description="统计天数"),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(require_view_audit),
     db: Session = Depends(get_db),
 ):
-    """
-    获取用户操作统计
-
-    需要管理员权限
-    """
     service = AuditService(db)
-    summary = service.get_user_action_summary(days)
-
+    summary = service.get_user_action_summary(
+        days,
+        user_ids=_get_audit_scope_user_ids(db, current_user),
+    )
     return {
         "days": days,
         "items": summary
@@ -121,14 +134,8 @@ def cleanup_old_logs(
     current_user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """
-    清理旧的审计日志
-
-    需要管理员权限
-    """
     service = AuditService(db)
     deleted = service.cleanup_old_logs(days)
-
     return {
         "success": True,
         "deleted_count": deleted,

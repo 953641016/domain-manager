@@ -102,21 +102,21 @@ function AppRouter() {
             }
           />
 
-          {/* 统计报表 - 超级管理员和管理员可见 */}
+          {/* 统计报表 - 所有 Web 角色可见，后端按角色隔离数据 */}
           <Route
             path="statistics"
             element={
-              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
                 <StatisticsPage />
               </PermissionRoute>
             }
           />
 
-          {/* 操作日志 - 超级管理员和管理员可见 */}
+          {/* 操作日志 - 所有 Web 角色可见，后端按角色隔离数据 */}
           <Route
             path="logs"
             element={
-              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN]}>
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
                 <LogsPage />
               </PermissionRoute>
             }
