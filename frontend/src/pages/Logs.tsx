@@ -34,6 +34,7 @@ export default function LogsPage() {
   const [draftUserKeyword, setDraftUserKeyword] = useState('');
   const [draftStartDate, setDraftStartDate] = useState('');
   const [draftEndDate, setDraftEndDate] = useState('');
+  const [dateRangeOpen, setDateRangeOpen] = useState(false);
   const pageSize = 20;
 
   useEffect(() => {
@@ -52,6 +53,7 @@ export default function LogsPage() {
     setUserKeyword(draftUserKeyword.trim());
     setStartDate(draftStartDate);
     setEndDate(draftEndDate);
+    setDateRangeOpen(false);
     setPage(1);
   };
 
@@ -105,6 +107,7 @@ export default function LogsPage() {
     setDraftUserKeyword('');
     setDraftStartDate('');
     setDraftEndDate('');
+    setDateRangeOpen(false);
     setPage(1);
   };
 
@@ -125,6 +128,9 @@ export default function LogsPage() {
     { value: 'user', label: '用户操作' },
     { value: 'system', label: '系统任务' },
   ];
+  const dateRangeLabel = draftStartDate || draftEndDate
+    ? `${draftStartDate || '开始日期'} 至 ${draftEndDate || '结束日期'}`
+    : '日期范围';
 
   if (loading) {
     return (
@@ -187,20 +193,15 @@ export default function LogsPage() {
               <option value="request">申请</option>
               <option value="user">用户</option>
             </select>
-            <input
-              type="date"
-              value={draftStartDate}
-              onChange={(e) => setDraftStartDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md"
-              title="开始日期"
-            />
-            <input
-              type="date"
-              value={draftEndDate}
-              onChange={(e) => setDraftEndDate(e.target.value)}
-              className="px-3 py-2 border border-gray-300 rounded-md"
-              title="结束日期"
-            />
+            <button
+              type="button"
+              onClick={() => setDateRangeOpen(true)}
+              className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md text-left text-sm text-gray-700 hover:bg-gray-50"
+              title="日期范围"
+            >
+              <span className="truncate">{dateRangeLabel}</span>
+              <span className="text-gray-400">📅</span>
+            </button>
             <input
               type="text"
               value={draftKeyword}
@@ -232,6 +233,70 @@ export default function LogsPage() {
           </div>
         </div>
       </div>
+
+      {dateRangeOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4"
+          onClick={() => setDateRangeOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-gray-900">选择日期范围</h2>
+              <button
+                type="button"
+                onClick={() => setDateRangeOpen(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="space-y-4">
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-gray-700">开始时间</span>
+                <input
+                  type="date"
+                  value={draftStartDate}
+                  onChange={(e) => setDraftStartDate(e.target.value)}
+                  onKeyDown={handleFilterKeyDown}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-sm font-medium text-gray-700">结束时间</span>
+                <input
+                  type="date"
+                  value={draftEndDate}
+                  onChange={(e) => setDraftEndDate(e.target.value)}
+                  onKeyDown={handleFilterKeyDown}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDraftStartDate('');
+                  setDraftEndDate('');
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+              >
+                清空日期
+              </button>
+              <button
+                type="button"
+                onClick={() => setDateRangeOpen(false)}
+                className="px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+              >
+                确定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-lg shadow overflow-hidden">
         {logs.length === 0 ? (
