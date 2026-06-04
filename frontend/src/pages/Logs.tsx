@@ -1,7 +1,7 @@
 /**
  * 审计日志页面
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, type KeyboardEvent } from 'react';
 import { api } from '@/api/client';
 import { formatDateTime } from '@/utils/datetime';
 
@@ -28,15 +28,37 @@ export default function LogsPage() {
   const [userKeyword, setUserKeyword] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [draftActionFilter, setDraftActionFilter] = useState('');
+  const [draftResourceTypeFilter, setDraftResourceTypeFilter] = useState('');
+  const [draftKeyword, setDraftKeyword] = useState('');
+  const [draftUserKeyword, setDraftUserKeyword] = useState('');
+  const [draftStartDate, setDraftStartDate] = useState('');
+  const [draftEndDate, setDraftEndDate] = useState('');
   const pageSize = 20;
 
   useEffect(() => {
     fetchLogs();
   }, [page, actorTypeFilter, actionFilter, resourceTypeFilter, keyword, userKeyword, startDate, endDate]);
 
-  const resetPage = (setter: (value: string) => void, value: string) => {
-    setter(value);
+  const switchActorType = (value: string) => {
+    setActorTypeFilter(value);
     setPage(1);
+  };
+
+  const applyFilters = () => {
+    setActionFilter(draftActionFilter);
+    setResourceTypeFilter(draftResourceTypeFilter);
+    setKeyword(draftKeyword.trim());
+    setUserKeyword(draftUserKeyword.trim());
+    setStartDate(draftStartDate);
+    setEndDate(draftEndDate);
+    setPage(1);
+  };
+
+  const handleFilterKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Enter') {
+      applyFilters();
+    }
   };
 
   const startTime = startDate ? `${startDate}T00:00:00` : undefined;
@@ -77,6 +99,12 @@ export default function LogsPage() {
     setUserKeyword('');
     setStartDate('');
     setEndDate('');
+    setDraftActionFilter('');
+    setDraftResourceTypeFilter('');
+    setDraftKeyword('');
+    setDraftUserKeyword('');
+    setDraftStartDate('');
+    setDraftEndDate('');
     setPage(1);
   };
 
@@ -119,7 +147,7 @@ export default function LogsPage() {
             {actorTabs.map((tab) => (
               <button
                 key={tab.value || 'all'}
-                onClick={() => resetPage(setActorTypeFilter, tab.value)}
+                onClick={() => switchActorType(tab.value)}
                 className={`relative px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
                   actorTypeFilter === tab.value
                     ? 'text-blue-600'
@@ -138,61 +166,69 @@ export default function LogsPage() {
         <div className="p-4 md:p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
             <select
-            value={actionFilter}
-            onChange={(e) => resetPage(setActionFilter, e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md"
-          >
-            <option value="">全部操作</option>
-            <option value="create">创建</option>
-            <option value="update">更新</option>
-            <option value="delete">删除</option>
-            <option value="approve">审批</option>
-          </select>
-          <select
-            value={resourceTypeFilter}
-            onChange={(e) => resetPage(setResourceTypeFilter, e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md"
-          >
-            <option value="">全部资源</option>
-            <option value="domain">域名</option>
-            <option value="dns_record">DNS记录</option>
-            <option value="request">申请</option>
-            <option value="user">用户</option>
-          </select>
-          <input
-            type="date"
-            value={startDate}
-            onChange={(e) => resetPage(setStartDate, e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md"
-            title="开始日期"
-          />
-          <input
-            type="date"
-            value={endDate}
-            onChange={(e) => resetPage(setEndDate, e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md"
-            title="结束日期"
-          />
-          <input
-            type="text"
-            value={keyword}
-            onChange={(e) => resetPage(setKeyword, e.target.value)}
-            placeholder="关键词"
-            className="px-3 py-2 border border-gray-300 rounded-md"
-          />
-          <input
-            type="text"
-            value={userKeyword}
-            onChange={(e) => resetPage(setUserKeyword, e.target.value)}
-            placeholder="用户"
-            className="px-3 py-2 border border-gray-300 rounded-md"
-          />
-          <button
-            onClick={clearFilters}
-            className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
-          >
-            清空
-          </button>
+              value={draftActionFilter}
+              onChange={(e) => setDraftActionFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md"
+            >
+              <option value="">全部操作</option>
+              <option value="create">创建</option>
+              <option value="update">更新</option>
+              <option value="delete">删除</option>
+              <option value="approve">审批</option>
+            </select>
+            <select
+              value={draftResourceTypeFilter}
+              onChange={(e) => setDraftResourceTypeFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md"
+            >
+              <option value="">全部资源</option>
+              <option value="domain">域名</option>
+              <option value="dns_record">DNS记录</option>
+              <option value="request">申请</option>
+              <option value="user">用户</option>
+            </select>
+            <input
+              type="date"
+              value={draftStartDate}
+              onChange={(e) => setDraftStartDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md"
+              title="开始日期"
+            />
+            <input
+              type="date"
+              value={draftEndDate}
+              onChange={(e) => setDraftEndDate(e.target.value)}
+              className="px-3 py-2 border border-gray-300 rounded-md"
+              title="结束日期"
+            />
+            <input
+              type="text"
+              value={draftKeyword}
+              onChange={(e) => setDraftKeyword(e.target.value)}
+              onKeyDown={handleFilterKeyDown}
+              placeholder="关键词"
+              className="px-3 py-2 border border-gray-300 rounded-md"
+            />
+            <input
+              type="text"
+              value={draftUserKeyword}
+              onChange={(e) => setDraftUserKeyword(e.target.value)}
+              onKeyDown={handleFilterKeyDown}
+              placeholder="用户"
+              className="px-3 py-2 border border-gray-300 rounded-md"
+            />
+            <button
+              onClick={applyFilters}
+              className="px-3 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
+            >
+              搜索
+            </button>
+            <button
+              onClick={clearFilters}
+              className="px-3 py-2 border border-gray-300 rounded-md text-sm text-gray-700 hover:bg-gray-50"
+            >
+              清空
+            </button>
           </div>
         </div>
       </div>
