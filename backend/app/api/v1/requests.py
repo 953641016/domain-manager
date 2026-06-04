@@ -17,6 +17,16 @@ from app.models.system import SystemDefaults
 from app.models.request import Request
 
 
+WEB_FLOW_DISABLED_MESSAGE = "Web端业务流程接口已禁用，请通过飞书申请与审批流程操作"
+
+
+def _raise_web_flow_disabled():
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail=WEB_FLOW_DISABLED_MESSAGE,
+    )
+
+
 def _get_specialist_scope_ids(db: Session, specialist_id: int) -> List[int]:
     """获取该专员可见的申请者 ID 集合（专员自身 + 其归属业务用户）"""
     rows = db.query(User.id).filter(
@@ -233,10 +243,9 @@ def create_request(
     db: Session = Depends(get_db),
 ):
     """
-    创建申请
-
-    所有用户都可以创建申请
+    创建申请（已禁用：业务流程只允许通过飞书发起）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
 
     # 验证申请类型
@@ -277,10 +286,9 @@ def update_request(
     db: Session = Depends(get_db),
 ):
     """
-    更新申请
-
-    需要域名专员或管理员权限
+    更新申请（已禁用：业务流程只允许通过飞书处理）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
     request = service.update_request(request_id, data)
 
@@ -301,10 +309,9 @@ def approve_request(
     db: Session = Depends(get_db),
 ):
     """
-    审批通过申请
-
-    需要管理员或域名专员权限
+    审批通过申请（已禁用：业务流程只允许通过飞书审批）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
     try:
         # 审批时若指定了注册商/解析账号覆盖，先写入申请
@@ -364,10 +371,9 @@ def reject_request(
     db: Session = Depends(get_db),
 ):
     """
-    拒绝申请
-
-    需要管理员或域名专员权限
+    拒绝申请（已禁用：业务流程只允许通过飞书审批）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
     try:
         request = service.reject_request(
@@ -399,10 +405,9 @@ def complete_request(
     db: Session = Depends(get_db),
 ):
     """
-    标记申请为已完成
-
-    需要管理员或域名专员权限
+    标记申请为已完成（已禁用：业务流程状态由执行服务维护）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
     request = service.complete_request(request_id, execution_result)
 
@@ -423,10 +428,9 @@ def fail_request(
     db: Session = Depends(get_db),
 ):
     """
-    标记申请为失败
-
-    需要管理员或域名专员权限
+    标记申请为失败（已禁用：业务流程状态由执行服务维护）
     """
+    _raise_web_flow_disabled()
     service = RequestService(db)
     request = service.fail_request(request_id, error_message)
 

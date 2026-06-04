@@ -14,7 +14,7 @@ class RegistrarFactory:
     """注册商工厂类"""
 
     # 支持的注册商
-    SUPPORTED_REGISTRARS = ["cloudflare", "godaddy", "namecheap", "enom"]
+    SUPPORTED_REGISTRARS = ["cloudflare", "godaddy"]
 
     # 支持的DNS解析商
     SUPPORTED_DNS_PROVIDERS = ["cloudflare", "dnspod"]
@@ -96,22 +96,6 @@ class RegistrarFactory:
                 "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
                 "supports_dns": True
             },
-            "namecheap": {
-                "code": "namecheap",
-                "name": "Namecheap",
-                "description": "Namecheap，提供低成本域名注册",
-                "supports_registration": True,
-                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
-                "supports_dns": True
-            },
-            "enom": {
-                "code": "enom",
-                "name": "Enom",
-                "description": "Enom，专业的域名注册商",
-                "supports_registration": True,
-                "supports_transfer": False,  # 已禁用：域名转入转出功能暂不开放，代码保留但API层未暴露
-                "supports_dns": True
-            }
         }
 
         return registrars.get(code, None)

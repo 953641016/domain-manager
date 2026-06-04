@@ -9,6 +9,8 @@
 ## [未发布]
 
 ### 新增
+- **DNS 记录同步合并逻辑**（`backend/app/tasks/scheduler.py`）：定时同步远程 DNS 记录时不再只计数，会将服务商返回的记录合并到本地表，支持新增、更新、远程缺失记录软删除，并在审计日志中记录新增/更新/删除数量。
+- **基础单元测试**（`pytest.ini`、`backend/tests/`）：新增后端测试入口，覆盖 Web 端业务流程写接口禁用、DNS 记录同步合并、Namecheap/Enom 占位注册商隐藏。
 - **服务商账号自检**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：注册账号和 DNS 账号列表新增“自检”按钮；后端只读调用服务商接口检查凭据与权限，注册账号检测查价/可注册性接口，Cloudflare DNS 检测 Token 与 Zone 读取权限，DNSPod 检测域名列表读取权限，并在前端展示原始失败原因。
 - **Cloudflare 重定向规则执行**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：DNS 申请中的 `REDIRECT_301`、`REDIRECT_302` 不再按普通 DNS 记录处理，Cloudflare 账号会通过 Rulesets API 创建或更新 Single Redirect 规则，并保持审批重复点击时幂等更新。
 - **后台申请详情账号选择**（`frontend/src/pages/Requests/Detail.tsx`）：后台 `/requests` 详情页待审批申请新增注册账号/DNS账号下拉选择，点击通过时会将所选账号传给后端执行，未选择时仍保留后端自动推断。
@@ -28,6 +30,9 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **Web 端业务流程写接口禁用**（`backend/app/api/v1/requests.py`）：`POST /requests`、审批、拒绝、更新、完成、失败等 Web 写接口统一返回 405，申请和审批主流程仅保留飞书入口，Web 后台用于查询、统计和配置。
+- **后台注册商占位项隐藏**（`backend/app/api/v1/registrar.py`、`backend/app/adapters/registrar_factory.py`）：Namecheap/Enom 暂不实现真实适配，注册商列表和旧版列表接口临时隐藏这两个占位项，避免后台误配置；工厂当前支持项收口为 Cloudflare/GoDaddy。
+- **交接文档待办收口**（`docs/项目交接文档.md`）：移除飞书文档侧 Bitable 配置和 Namecheap/Enom 适配器待办，保留当前实际待推进事项。
 - **系统管理员申请详情只读**（`backend/app/api/v1/requests.py`、`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批操作区仅域名专员和超级管理员可见；审批、拒绝、更新申请接口同步收紧为域名专员/超管角色，系统管理员只能查看申请信息。
 - **DNS 审批默认账号选择**（`backend/app/api/v1/feishu.py`、`backend/app/api/v1/requests.py`）：提交 DNS 解析申请时优先读取域名列表中已绑定的 DNS 账号作为默认审批账号；飞书审批卡片默认选中该账号，后台申请详情页也会在待审批状态默认展示该账号，审核人员仍可下拉切换。
 - **域名注册购买链路校正**（`backend/app/adapters/cloudflare.py`、`backend/app/adapters/godaddy.py`、`backend/app/services/execution_service.py`、`backend/app/api/v1/feishu.py`）：Cloudflare 注册改用官方 `/registrar/registrations` 接口与 `domain_name` 字段；GoDaddy 购买按审批选择传递注册年限并使用当前授权时间；注册执行前若查价/可用性检查失败会直接阻断，避免未确认价格时继续购买；GoDaddy 查价失败保留 `ACCESS_DENIED` 等原始错误信息展示到审批卡片。

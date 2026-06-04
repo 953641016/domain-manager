@@ -25,6 +25,8 @@ from app.services.user_confirmation_service import UserOperationConfirmationServ
 
 router = APIRouter(prefix="/providers", tags=["服务商管理"])
 
+HIDDEN_REGISTRAR_CODES = {"namecheap", "enom"}
+
 # ==================== 内部工具 ====================
 
 def _make_provider_confirmation(db, current_user, op_type, details, description=""):
@@ -63,6 +65,7 @@ def list_registrars(
 ):
     """获取注册商列表（domain_spec/super_admin 可见）"""
     q = db.query(Registrar)
+    q = q.filter(~Registrar.code.in_(HIDDEN_REGISTRAR_CODES))
     if enabled_only:
         q = q.filter(Registrar.is_enabled == True)
     return [RegistrarResponse.model_validate(r) for r in q.order_by(Registrar.name).all()]
@@ -196,7 +199,13 @@ def legacy_list_registrars(
     db: Session = Depends(get_db),
 ):
     """旧格式兼容（Config.tsx 下拉框使用）"""
-    registrars = db.query(Registrar).filter(Registrar.is_enabled == True).order_by(Registrar.name).all()
+    registrars = (
+        db.query(Registrar)
+        .filter(Registrar.is_enabled == True)
+        .filter(~Registrar.code.in_(HIDDEN_REGISTRAR_CODES))
+        .order_by(Registrar.name)
+        .all()
+    )
     return {"registrars": [{"code": r.code, "name": r.name, "description": r.description or ""} for r in registrars]}
 
 

@@ -26,6 +26,150 @@ class TaskScheduler:
         self._running = False
         logger.info("任务调度器已停止")
 
+    @staticmethod
+    def _normalize_dns_host(host: Optional[str]) -> str:
+        if not host or host == "":
+            return "@"
+        return str(host).strip()
+
+    @staticmethod
+    def _normalize_remote_dns_record(record: dict) -> Optional[dict]:
+        record_type = (record.get("type") or record.get("record_type") or "").upper()
+        host = TaskScheduler._normalize_dns_host(record.get("host") or record.get("name"))
+        value = record.get("value") or record.get("content")
+
+        if not record_type or value in (None, ""):
+            return None
+
+        ttl = record.get("ttl", 300)
+        try:
+            ttl = int(ttl)
+        except (TypeError, ValueError):
+            ttl = 300
+
+        priority = record.get("priority")
+        if priority in ("", None):
+            priority = None
+        else:
+            try:
+                priority = int(priority)
+            except (TypeError, ValueError):
+                priority = None
+
+        remote_status = record.get("status")
+        status_value = "active" if remote_status in (None, "", "ENABLE", "active") else str(remote_status)
+
+        return {
+            "external_id": str(record.get("id")) if record.get("id") not in (None, "") else None,
+            "record_type": record_type,
+            "host": host,
+            "value": str(value),
+            "ttl": ttl,
+            "priority": priority,
+            "status": status_value,
+        }
+
+    @staticmethod
+    def _natural_dns_key(record_type: str, host: str, value: str, priority: Optional[int]):
+        return (record_type, host, value, priority)
+
+    def _merge_remote_dns_records(self, domain, remote_records: list[dict]) -> dict:
+        from app.models.dns import DnsRecord
+
+        now = datetime.now()
+        local_records = self.db.query(DnsRecord).filter(
+            DnsRecord.domain_id == domain.id,
+            DnsRecord.status != "deleted",
+        ).all()
+        local_by_external = {
+            record.external_id: record
+            for record in local_records
+            if record.external_id
+        }
+        local_by_natural = {
+            self._natural_dns_key(record.record_type, record.host, record.value, record.priority): record
+            for record in local_records
+        }
+
+        created_count = 0
+        updated_count = 0
+        unchanged_count = 0
+        deleted_count = 0
+        seen_local_ids = set()
+
+        for raw_record in remote_records or []:
+            remote = self._normalize_remote_dns_record(raw_record)
+            if not remote:
+                continue
+
+            natural_key = self._natural_dns_key(
+                remote["record_type"],
+                remote["host"],
+                remote["value"],
+                remote["priority"],
+            )
+            local_record = (
+                local_by_external.get(remote["external_id"])
+                if remote["external_id"]
+                else None
+            ) or local_by_natural.get(natural_key)
+
+            if not local_record:
+                local_record = DnsRecord(
+                    domain_id=domain.id,
+                    record_type=remote["record_type"],
+                    host=remote["host"],
+                    value=remote["value"],
+                    ttl=remote["ttl"],
+                    priority=remote["priority"],
+                    status=remote["status"],
+                    sync_status="synced",
+                    external_id=remote["external_id"],
+                    last_synced_at=now,
+                    remark="由远程DNS同步创建",
+                )
+                self.db.add(local_record)
+                self.db.flush()
+                if local_record.external_id:
+                    local_by_external[local_record.external_id] = local_record
+                local_by_natural[natural_key] = local_record
+                created_count += 1
+            else:
+                changed = False
+                for field in ["record_type", "host", "value", "ttl", "priority", "status", "external_id"]:
+                    if getattr(local_record, field) != remote[field]:
+                        setattr(local_record, field, remote[field])
+                        changed = True
+                if local_record.sync_status != "synced":
+                    local_record.sync_status = "synced"
+                    changed = True
+                local_record.last_synced_at = now
+                if changed:
+                    updated_count += 1
+                else:
+                    unchanged_count += 1
+
+            seen_local_ids.add(local_record.id)
+
+        for local_record in local_records:
+            if local_record.id in seen_local_ids:
+                continue
+            if not local_record.external_id and local_record.sync_status != "synced":
+                continue
+            local_record.status = "deleted"
+            local_record.sync_status = "synced"
+            local_record.last_synced_at = now
+            deleted_count += 1
+
+        self.db.commit()
+        return {
+            "created": created_count,
+            "updated": updated_count,
+            "unchanged": unchanged_count,
+            "deleted": deleted_count,
+            "processed": created_count + updated_count + unchanged_count + deleted_count,
+        }
+
     def check_expiring_domains(self, days: int = 30):
         """
         检查即将到期的域名
@@ -153,6 +297,10 @@ class TaskScheduler:
 
             synced_count = 0
             failed_count = 0
+            created_count = 0
+            updated_count = 0
+            unchanged_count = 0
+            deleted_count = 0
 
             for domain in domains:
                 if not domain.registrar_code or not domain.reg_account_id:
@@ -223,12 +371,10 @@ class TaskScheduler:
             return
 
         from app.services.domain_service import DomainService
-        from app.services.dns_service import DnsService
         from app.services.audit_service import AuditService
         from app.adapters.registrar_factory import RegistrarFactory
 
         domain_service = DomainService(self.db)
-        dns_service = DnsService(self.db)
         audit_service = AuditService(self.db)
 
         try:
@@ -251,15 +397,19 @@ class TaskScheduler:
                     # 创建适配器
                     adapter = RegistrarFactory.create_dns_provider(
                         code=domain.dns_provider_code,
-                        api_key=dns_account.api_key
+                        api_key=dns_account.api_key,
+                        api_secret=dns_account.api_secret,
                     )
 
                     # 获取远程DNS记录
                     remote_records = adapter.get_records(domain.name)
 
-                    # TODO: 合并本地和远程记录
-                    # 目前只记录同步结果
-                    synced_count += 1
+                    merge_result = self._merge_remote_dns_records(domain, remote_records)
+                    synced_count += merge_result["processed"]
+                    created_count += merge_result["created"]
+                    updated_count += merge_result["updated"]
+                    unchanged_count += merge_result["unchanged"]
+                    deleted_count += merge_result["deleted"]
 
                 except Exception as e:
                     logger.error(f"同步域名 {domain.name} DNS记录失败: {str(e)}")
@@ -269,8 +419,18 @@ class TaskScheduler:
             audit_service.log(
                 action="sync_dns",
                 resource_type="dns_record",
-                resource_name=f"DNS记录同步: 成功 {synced_count} / 失败 {failed_count}",
-                after_state={"synced": synced_count, "failed": failed_count},
+                resource_name=(
+                    f"DNS记录同步: 成功 {synced_count} / 失败 {failed_count}"
+                    f"（新增 {created_count} / 更新 {updated_count} / 删除 {deleted_count}）"
+                ),
+                after_state={
+                    "synced": synced_count,
+                    "failed": failed_count,
+                    "created": created_count,
+                    "updated": updated_count,
+                    "unchanged": unchanged_count,
+                    "deleted": deleted_count,
+                },
                 status="success" if failed_count == 0 else "failed"
             )
 

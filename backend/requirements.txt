@@ -29,3 +29,6 @@ APScheduler>=3.10.0
 
 # 工具
 python-multipart>=0.0.6
+
+# 测试
+pytest>=7.4.0
