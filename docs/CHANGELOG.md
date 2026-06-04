@@ -25,6 +25,7 @@
 - **系统任务审计展示**（`backend/app/services/audit_service.py`）：系统定时任务写入审计日志时若无人工操作人，用户列统一显示为“系统任务”，避免后台日志列表出现空用户。
 - **系统同步日志资源名**（`backend/app/tasks/scheduler.py`）：域名状态同步和 DNS 记录同步日志写入真实成功/失败数量，资源列显示如“DNS记录同步: 成功 4 / 失败 0”，不再显示空资源名。
 - **操作日志筛选增强**（`backend/app/api/v1/audit.py`、`backend/app/services/audit_service.py`、`frontend/src/pages/Logs.tsx`）：操作日志支持按“用户操作/系统任务”、日期范围、关键词、用户关键词筛选，便于系统任务增多后快速定位。
+- **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中，避免标题与筛选栏在宽屏下错位拥挤。
 
 ### 修复
 - **系统管理员申请详情只读**（`backend/app/api/v1/requests.py`、`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批操作区仅域名专员和超级管理员可见；审批、拒绝、更新申请接口同步收紧为域名专员/超管角色，系统管理员只能查看申请信息。

@@ -92,6 +92,12 @@ export default function LogsPage() {
     );
   };
 
+  const actorTabs = [
+    { value: '', label: '全部日志' },
+    { value: 'user', label: '用户操作' },
+    { value: 'system', label: '系统任务' },
+  ];
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -102,19 +108,36 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div>
         <h1 className="text-2xl font-bold text-gray-800">审计日志</h1>
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-7 gap-2">
-          <select
-            value={actorTypeFilter}
-            onChange={(e) => resetPage(setActorTypeFilter, e.target.value)}
-            className="px-3 py-2 border border-gray-300 rounded-md"
-          >
-            <option value="">全部类型</option>
-            <option value="user">用户操作</option>
-            <option value="system">系统任务</option>
-          </select>
-          <select
+        <p className="mt-1 text-sm text-gray-500">按操作来源、日期、关键词和用户快速定位日志。</p>
+      </div>
+
+      <div className="bg-white rounded-lg shadow-sm border border-gray-100">
+        <div className="border-b border-gray-100 px-4 md:px-5">
+          <div className="flex gap-1 overflow-x-auto">
+            {actorTabs.map((tab) => (
+              <button
+                key={tab.value || 'all'}
+                onClick={() => resetPage(setActorTypeFilter, tab.value)}
+                className={`relative px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors ${
+                  actorTypeFilter === tab.value
+                    ? 'text-blue-600'
+                    : 'text-gray-500 hover:text-gray-800'
+                }`}
+              >
+                {tab.label}
+                {actorTypeFilter === tab.value && (
+                  <span className="absolute inset-x-3 bottom-0 h-0.5 rounded-full bg-blue-600" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="p-4 md:p-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
+            <select
             value={actionFilter}
             onChange={(e) => resetPage(setActionFilter, e.target.value)}
             className="px-3 py-2 border border-gray-300 rounded-md"
@@ -170,6 +193,7 @@ export default function LogsPage() {
           >
             清空
           </button>
+          </div>
         </div>
       </div>
 
