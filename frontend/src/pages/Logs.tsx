@@ -16,6 +16,41 @@ interface AuditLog {
   created_at: string;
 }
 
+const formatDateKey = (date: Date) => {
+  const year = date.getFullYear();
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const parseDateKey = (dateKey: string) => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+const addDays = (date: Date, days: number) => {
+  const nextDate = new Date(date);
+  nextDate.setDate(nextDate.getDate() + days);
+  return nextDate;
+};
+
+const addMonths = (date: Date, months: number) => {
+  const nextDate = new Date(date);
+  nextDate.setMonth(nextDate.getMonth() + months);
+  return nextDate;
+};
+
+const getMonthStart = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1);
+
+const getMonthDays = (monthDate: Date) => {
+  const monthStart = getMonthStart(monthDate);
+  const mondayOffset = (monthStart.getDay() + 6) % 7;
+  const gridStart = addDays(monthStart, -mondayOffset);
+  return Array.from({ length: 42 }, (_, index) => addDays(gridStart, index));
+};
+
+const getMonthTitle = (monthDate: Date) => `${monthDate.getFullYear()}年${monthDate.getMonth() + 1}月`;
+
 export default function LogsPage() {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
@@ -35,6 +70,7 @@ export default function LogsPage() {
   const [draftStartDate, setDraftStartDate] = useState('');
   const [draftEndDate, setDraftEndDate] = useState('');
   const [dateRangeOpen, setDateRangeOpen] = useState(false);
+  const [calendarMonthKey, setCalendarMonthKey] = useState(() => formatDateKey(getMonthStart(new Date())));
   const pageSize = 20;
 
   useEffect(() => {
@@ -131,6 +167,119 @@ export default function LogsPage() {
   const dateRangeLabel = draftStartDate || draftEndDate
     ? `${draftStartDate || '开始日期'} 至 ${draftEndDate || '结束日期'}`
     : '日期范围';
+  const currentCalendarMonth = parseDateKey(calendarMonthKey);
+  const nextCalendarMonth = addMonths(currentCalendarMonth, 1);
+  const weekdayLabels = ['一', '二', '三', '四', '五', '六', '日'];
+
+  const openDateRangePicker = () => {
+    const selectedMonth = draftStartDate ? parseDateKey(draftStartDate) : new Date();
+    setCalendarMonthKey(formatDateKey(getMonthStart(selectedMonth)));
+    setDateRangeOpen(true);
+  };
+
+  const shiftCalendarMonth = (months: number) => {
+    setCalendarMonthKey(formatDateKey(getMonthStart(addMonths(currentCalendarMonth, months))));
+  };
+
+  const selectCalendarDate = (dateKey: string) => {
+    if (!draftStartDate || draftEndDate) {
+      setDraftStartDate(dateKey);
+      setDraftEndDate('');
+      return;
+    }
+
+    if (dateKey < draftStartDate) {
+      setDraftStartDate(dateKey);
+      setDraftEndDate(draftStartDate);
+      return;
+    }
+
+    setDraftEndDate(dateKey);
+  };
+
+  const applyDraftDateRange = (startDateValue: Date, endDateValue: Date) => {
+    setDraftStartDate(formatDateKey(startDateValue));
+    setDraftEndDate(formatDateKey(endDateValue));
+    setCalendarMonthKey(formatDateKey(getMonthStart(startDateValue)));
+  };
+
+  const setQuickDateRange = (type: string) => {
+    const today = new Date();
+
+    if (type === 'today') {
+      applyDraftDateRange(today, today);
+      return;
+    }
+
+    if (type === 'yesterday') {
+      const yesterday = addDays(today, -1);
+      applyDraftDateRange(yesterday, yesterday);
+      return;
+    }
+
+    if (type === 'last7') {
+      applyDraftDateRange(addDays(today, -6), today);
+      return;
+    }
+
+    if (type === 'last30') {
+      applyDraftDateRange(addDays(today, -29), today);
+      return;
+    }
+
+    if (type === 'thisMonth') {
+      applyDraftDateRange(getMonthStart(today), today);
+      return;
+    }
+
+    const lastMonth = addMonths(today, -1);
+    applyDraftDateRange(getMonthStart(lastMonth), addDays(getMonthStart(today), -1));
+  };
+
+  const isRangeDate = (dateKey: string) => Boolean(
+    draftStartDate &&
+    draftEndDate &&
+    dateKey >= draftStartDate &&
+    dateKey <= draftEndDate
+  );
+
+  const renderCalendarMonth = (monthDate: Date) => (
+    <div className="flex-1">
+      <div className="mb-3 text-center text-sm font-semibold text-gray-800">{getMonthTitle(monthDate)}</div>
+      <div className="grid grid-cols-7 gap-1 text-center text-xs text-gray-400">
+        {weekdayLabels.map((weekday) => (
+          <div key={weekday} className="py-1">{weekday}</div>
+        ))}
+      </div>
+      <div className="mt-1 grid grid-cols-7 gap-1">
+        {getMonthDays(monthDate).map((date) => {
+          const dateKey = formatDateKey(date);
+          const isCurrentMonth = date.getMonth() === monthDate.getMonth();
+          const isStartOrEnd = dateKey === draftStartDate || dateKey === draftEndDate;
+          const isInRange = isRangeDate(dateKey);
+
+          return (
+            <button
+              type="button"
+              key={dateKey}
+              onClick={() => selectCalendarDate(dateKey)}
+              className={`h-9 rounded-md text-sm transition-colors ${
+                isStartOrEnd
+                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                  : isInRange
+                    ? 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    : isCurrentMonth
+                      ? 'text-gray-700 hover:bg-gray-100'
+                      : 'text-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {date.getDate()}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -195,7 +344,7 @@ export default function LogsPage() {
             </select>
             <button
               type="button"
-              onClick={() => setDateRangeOpen(true)}
+              onClick={openDateRangePicker}
               className="flex items-center justify-between gap-2 px-3 py-2 border border-gray-300 rounded-md text-left text-sm text-gray-700 hover:bg-gray-50"
               title="日期范围"
             >
@@ -240,7 +389,7 @@ export default function LogsPage() {
           onClick={() => setDateRangeOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+            className="w-full max-w-4xl rounded-lg bg-white p-5 shadow-xl"
             onClick={(event) => event.stopPropagation()}
           >
             <div className="mb-4 flex items-center justify-between">
@@ -253,27 +402,51 @@ export default function LogsPage() {
                 ✕
               </button>
             </div>
-            <div className="space-y-4">
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium text-gray-700">开始时间</span>
-                <input
-                  type="date"
-                  value={draftStartDate}
-                  onChange={(e) => setDraftStartDate(e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-sm font-medium text-gray-700">结束时间</span>
-                <input
-                  type="date"
-                  value={draftEndDate}
-                  onChange={(e) => setDraftEndDate(e.target.value)}
-                  onKeyDown={handleFilterKeyDown}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                />
-              </label>
+            <div className="grid gap-4 md:grid-cols-[140px_1fr]">
+              <div className="flex gap-2 overflow-x-auto md:flex-col">
+                {[
+                  { type: 'today', label: '今天' },
+                  { type: 'yesterday', label: '昨天' },
+                  { type: 'last7', label: '最近 7 天' },
+                  { type: 'last30', label: '最近 30 天' },
+                  { type: 'thisMonth', label: '本月' },
+                  { type: 'lastMonth', label: '上月' },
+                ].map((item) => (
+                  <button
+                    type="button"
+                    key={item.type}
+                    onClick={() => setQuickDateRange(item.type)}
+                    className="shrink-0 rounded-md px-3 py-2 text-left text-sm text-gray-700 hover:bg-blue-50 hover:text-blue-700"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="min-w-0">
+                <div className="mb-3 flex items-center justify-between">
+                  <button
+                    type="button"
+                    onClick={() => shiftCalendarMonth(-1)}
+                    className="rounded-md px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
+                  >
+                    上个月
+                  </button>
+                  <div className="text-sm text-gray-500">
+                    {draftStartDate || '开始日期'} 至 {draftEndDate || '结束日期'}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => shiftCalendarMonth(1)}
+                    className="rounded-md px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
+                  >
+                    下个月
+                  </button>
+                </div>
+                <div className="grid gap-5 md:grid-cols-2">
+                  {renderCalendarMonth(currentCalendarMonth)}
+                  {renderCalendarMonth(nextCalendarMonth)}
+                </div>
+              </div>
             </div>
             <div className="mt-5 flex justify-end gap-3">
               <button
