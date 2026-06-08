@@ -8,11 +8,13 @@
 """
 import json
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.database import SessionLocal
 from app.models.request import Request
 from app.models.domain import Domain
 from app.services.domain_service import DomainService
@@ -60,7 +62,12 @@ class ExecutionService:
         error_message = None if success else self._summarize_failure(result)
         if error_message and not result.get("error"):
             result["error"] = error_message
-        request.status = "completed" if success else "failed"
+        is_async_register = (
+            request.type == "domain_register"
+            and success
+            and bool(result.get("registration_pending"))
+        )
+        request.status = "approved" if is_async_register else ("completed" if success else "failed")
         request.execution_result = result
         request.error_message = error_message
         try:
@@ -73,6 +80,8 @@ class ExecutionService:
         # 审计 + 通知（均不影响主流程）
         self._safe_audit(request, result)
         self._notify(request, result)
+        if is_async_register:
+            self._start_registration_finalizer(request.id, result)
         return result
 
     # ==================== DNS 解析执行 ====================
@@ -335,6 +344,116 @@ class ExecutionService:
                 owner_id=account.owner_id,
             ))
         self.db.commit()
+
+    def _start_registration_finalizer(self, request_id: str, initial_result: Dict[str, Any]) -> None:
+        """后台轮询注册最终结果，避免飞书卡片交互或审批执行线程长时间等待。"""
+        worker = threading.Thread(
+            target=self._finalize_registration_async,
+            args=(request_id, dict(initial_result or {})),
+            daemon=True,
+        )
+        worker.start()
+
+    @classmethod
+    def _finalize_registration_async(cls, request_id: str, initial_result: Dict[str, Any]) -> None:
+        db = SessionLocal()
+        service = cls(db)
+        try:
+            request = db.query(Request).filter(Request.id == request_id).first()
+            if not request or request.type != "domain_register":
+                return
+            if request.status not in ("approved", "completed"):
+                return
+
+            account = (
+                service.domain_service.get_reg_account_decrypted(request.selected_reg_account_id)
+                if request.selected_reg_account_id else None
+            )
+            registrar_code = request.selected_registrar_code or (account.registrar_code if account else None)
+            if not account or not registrar_code:
+                final_result = {
+                    **initial_result,
+                    "success": False,
+                    "registration_pending": False,
+                    "error": "未配置注册账号或注册商，无法查询最终注册结果",
+                }
+            else:
+                try:
+                    adapter = RegistrarFactory.create_registrar(
+                        registrar_code,
+                        account.api_key,
+                        account.api_secret,
+                        account_id=account.api_secret if registrar_code == "cloudflare" else None,
+                    )
+                    if hasattr(adapter, "wait_for_registration_result"):
+                        final_reg = adapter.wait_for_registration_result(
+                            request.domain_name,
+                            initial_result,
+                            timeout=600,
+                        )
+                    else:
+                        final_reg = {"success": False, "message": f"{registrar_code} 不支持异步注册结果查询"}
+                except Exception as e:
+                    final_reg = {"success": False, "message": f"查询最终注册结果异常: {str(e)}"}
+
+                final_result = service._merge_register_final_result(request, account, registrar_code, initial_result, final_reg)
+
+            final_success = bool(final_result.get("success")) and not final_result.get("registration_pending")
+            if final_success:
+                request.status = "completed"
+                request.error_message = None
+            elif final_result.get("registration_pending"):
+                request.status = "approved"
+                request.error_message = None
+            else:
+                request.status = "failed"
+                request.error_message = service._summarize_failure(final_result)
+                if request.error_message and not final_result.get("error"):
+                    final_result["error"] = request.error_message
+
+            request.execution_result = final_result
+            db.commit()
+            db.refresh(request)
+            service._safe_audit(request, final_result)
+            service._notify(request, final_result)
+        except Exception:
+            db.rollback()
+            logger.exception("后台查询域名注册最终结果失败: %s", request_id)
+        finally:
+            db.close()
+
+    def _merge_register_final_result(
+        self,
+        request: Request,
+        account,
+        registrar_code: str,
+        initial_result: Dict[str, Any],
+        final_reg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        final_result = {
+            **(initial_result or {}),
+            "success": bool(final_reg.get("success")),
+            "domain": request.domain_name,
+            "order_id": final_reg.get("order_id") or (initial_result or {}).get("order_id"),
+            "registration_date": final_reg.get("registration_date") or (initial_result or {}).get("registration_date"),
+            "expiration_date": final_reg.get("expiration_date") or (initial_result or {}).get("expiration_date"),
+            "registration_pending": bool(final_reg.get("registration_pending")),
+            "registration_unknown": bool(final_reg.get("registration_unknown")),
+            "message": final_reg.get("message") or (initial_result or {}).get("message"),
+            "workflow_state": final_reg.get("workflow_state") or (initial_result or {}).get("workflow_state"),
+            "registrar_code": registrar_code,
+            "reg_account_name": account.name if account else (initial_result or {}).get("reg_account_name"),
+        }
+        if not final_result["success"]:
+            final_result["error"] = final_reg.get("message") or final_reg.get("error") or "注册失败"
+
+        if final_result["success"] and not final_result["registration_pending"]:
+            try:
+                self._create_domain_record(request, account, final_result)
+            except Exception:
+                logger.exception("注册最终成功但写入域名表失败")
+
+        return final_result
 
     # ==================== 差异化通知 ====================
 

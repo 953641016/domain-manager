@@ -100,7 +100,16 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         return None
 
     def _wait_for_registration(self, domain: str, initial_result: Dict[str, Any]) -> Dict[str, Any]:
-        deadline = time.monotonic() + self.registration_poll_timeout
+        return self.wait_for_registration_result(domain, initial_result, self.registration_poll_timeout)
+
+    def wait_for_registration_result(
+        self,
+        domain: str,
+        initial_result: Optional[Dict[str, Any]] = None,
+        timeout: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """轮询 Cloudflare 注册工作流，直到获取最终结果或超时。"""
+        deadline = time.monotonic() + (timeout or self.registration_poll_timeout)
         last_result = initial_result or {}
 
         while time.monotonic() < deadline:
@@ -273,7 +282,12 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
                     }
                 if response.status_code == 201 or self._is_workflow_succeeded(result):
                     return self._registration_payload(domain, result, "注册成功")
-                return self._wait_for_registration(domain, result)
+                return self._registration_payload(
+                    domain,
+                    result,
+                    f"Cloudflare 已受理注册请求，等待最终结果: {result}",
+                    pending=True,
+                )
             else:
                 errors = data.get("errors", [])
                 return {

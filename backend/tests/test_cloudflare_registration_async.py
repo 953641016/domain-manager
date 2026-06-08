@@ -42,7 +42,7 @@ def test_cloudflare_registration_timeout_reconciles_existing_registration(monkey
     assert result["expiration_date"] == "2027-06-08T08:56:07Z"
 
 
-def test_cloudflare_registration_accepted_polls_until_succeeded(monkeypatch):
+def test_cloudflare_registration_accepted_returns_pending_without_waiting(monkeypatch):
     adapter = CloudflareRegistrarAdapter("token", account_id="account-id")
 
     def fake_post(url, headers, json, timeout):
@@ -55,6 +55,23 @@ def test_cloudflare_registration_accepted_polls_until_succeeded(monkeypatch):
                 "completed": False,
             },
         }, status_code=202)
+
+    def fake_get(url, **kwargs):
+        raise AssertionError("register_domain should not block waiting for final Cloudflare result")
+
+    monkeypatch.setattr("app.adapters.cloudflare.requests.post", fake_post)
+    monkeypatch.setattr("app.adapters.cloudflare.requests.get", fake_get)
+
+    result = adapter.register_domain("steady-domain.net", {}, years=1)
+
+    assert result["success"] is True
+    assert result["registration_pending"] is True
+    assert result["order_id"] == "workflow-1"
+    assert "等待最终结果" in result["message"]
+
+
+def test_cloudflare_registration_final_poll_succeeds(monkeypatch):
+    adapter = CloudflareRegistrarAdapter("token", account_id="account-id")
 
     def fake_get(url, **kwargs):
         if url.endswith("/registration-status"):
@@ -77,11 +94,14 @@ def test_cloudflare_registration_accepted_polls_until_succeeded(monkeypatch):
             },
         })
 
-    monkeypatch.setattr("app.adapters.cloudflare.requests.post", fake_post)
     monkeypatch.setattr("app.adapters.cloudflare.requests.get", fake_get)
     monkeypatch.setattr("app.adapters.cloudflare.time.sleep", lambda seconds: None)
 
-    result = adapter.register_domain("steady-domain.net", {}, years=1)
+    result = adapter.wait_for_registration_result(
+        "steady-domain.net",
+        {"workflow_id": "workflow-1", "state": "pending", "completed": False},
+        timeout=5,
+    )
 
     assert result["success"] is True
     assert result["registration_pending"] is False

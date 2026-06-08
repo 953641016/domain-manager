@@ -37,7 +37,7 @@
 - **系统管理员申请详情只读**（`backend/app/api/v1/requests.py`、`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批操作区仅域名专员和超级管理员可见；审批、拒绝、更新申请接口同步收紧为域名专员/超管角色，系统管理员只能查看申请信息。
 - **DNS 审批默认账号选择**（`backend/app/api/v1/feishu.py`、`backend/app/api/v1/requests.py`）：提交 DNS 解析申请时优先读取域名列表中已绑定的 DNS 账号作为默认审批账号；飞书审批卡片默认选中该账号，后台申请详情页也会在待审批状态默认展示该账号，审核人员仍可下拉切换。
 - **域名注册购买链路校正**（`backend/app/adapters/cloudflare.py`、`backend/app/adapters/godaddy.py`、`backend/app/services/execution_service.py`、`backend/app/api/v1/feishu.py`）：Cloudflare 注册改用官方 `/registrar/registrations` 接口与 `domain_name` 字段；GoDaddy 购买按审批选择传递注册年限并使用当前授权时间；注册执行前若查价/可用性检查失败会直接阻断，避免未确认价格时继续购买；GoDaddy 查价失败保留 `ACCESS_DENIED` 等原始错误信息展示到审批卡片。
-- **Cloudflare 注册异步确认**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：注册请求改为 `Prefer: respond-async`，提交后轮询 `registration-status` 并反查注册资源；请求超时时不再直接判失败，避免 Cloudflare 已扣费/已注册但系统误报失败或触发重复购买。
+- **Cloudflare 注册异步确认**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：注册请求改为 `Prefer: respond-async`；若 Cloudflare 立即返回最终结果则直接发送最终卡片，若仍在处理则先发送“域名注册已提交/待确认”卡片，并由后台轮询 `registration-status` 反查注册资源后再次发送最终结果卡片；请求超时时不再直接判失败，避免 Cloudflare 已扣费/已注册但系统误报失败或触发重复购买。
 - **域名页 DNS 操作**（`frontend/src/pages/Domains/index.tsx`、`frontend/src/pages/Domains/Detail.tsx`）：域名列表 DNS 按钮改为跳转详情页 DNS 区域，避免 `/dns` 未配置路由导致 404；详情页“查看 DNS 记录”按钮接入 `/api/v1/dns/domain/{domain_id}` 并展示记录列表。
 - **域名购买报价原始原因展示**（`backend/app/api/v1/feishu.py`）：注册商返回域名不可注册时，飞书审批卡片报价保留原始 `message`（如 `domain_unavailable`），方便审核人员快速定位问题。
 - **飞书文档主域名识别**（`backend/app/services/feishu_doc_parser.py`）：支持 `2、域名` 下一行填写主域名的文档格式，避免新需求文档提示“未能从文档中解析出主域名”。
