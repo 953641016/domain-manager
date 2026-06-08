@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **飞书菜单自主注册域名**（`backend/app/api/v1/feishu.py`）：支持机器人底部菜单事件触发“自主注册域名”入口；域名专员/超级管理员点击后返回飞书表单卡片，可填写域名、注册账号、年限和可选联系人 JSON，提交后直接创建并批准注册申请，后台执行注册、发送结果卡片并写入操作日志；无权限用户会收到无权限提示卡片。
 - **DNS 记录同步合并逻辑**（`backend/app/tasks/scheduler.py`）：定时同步远程 DNS 记录时不再只计数，会将服务商返回的记录合并到本地表，支持新增、更新、远程缺失记录软删除，并在审计日志中记录新增/更新/删除数量。
 - **基础单元测试**（`pytest.ini`、`backend/tests/`）：新增后端测试入口，覆盖 Web 端业务流程写接口禁用、DNS 记录同步合并、Namecheap/Enom 占位注册商隐藏。
 - **服务商账号自检**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：注册账号和 DNS 账号列表新增“自检”按钮；后端只读调用服务商接口检查凭据与权限，注册账号检测查价/可注册性接口，Cloudflare DNS 检测 Token 与 Zone 读取权限，DNSPod 检测域名列表读取权限，并在前端展示原始失败原因。
@@ -19,7 +20,7 @@
 - **新版审批卡片**：购买域名卡片展示域名、申请人、注册账号下拉、注册年限、预估价格、来源文档、拒绝理由；DNS 卡片展示记录预览、DNS 账号下拉、审核备注、拒绝理由。审批通过后自动执行，拒绝后通知申请人。
 - **域名购买报价联动**（`backend/app/api/v1/feishu.py`）：购买域名审批卡片按审核人可用的 Cloudflare/GoDaddy 注册账号实时获取报价，下拉选项展示账号与价格；审批通过时按最终选择的账号重新查价，服务商明确返回不可注册时阻止执行。
 - **后台默认注册服务商配置**（`frontend/src/pages/Config.tsx`）：注册账号表单按 Cloudflare/GoDaddy 展示 Token、Account ID、API Key、Secret 等对应字段，支持新增/编辑时设为默认注册服务商；列表页用徽标与“默认注册账号”列清晰展示默认账号。
-- **文档解析配置**（`backend/app/config.py`）：新增 `FEISHU_DOC_APP_ID`、`FEISHU_DOC_APP_SECRET`、`BACKEND_DNS_DEFAULT_TARGET`，用于文档读取应用和后端接口域名默认解析目标。
+- **飞书文档解析配置收口**（`backend/app/config.py`、`backend/app/services/feishu_doc_parser.py`）：文档、Wiki 和多维表格读取统一复用 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`，不再维护独立的 `FEISHU_DOC_APP_ID` / `FEISHU_DOC_APP_SECRET`；保留 `BACKEND_DNS_DEFAULT_TARGET` 用于后端接口域名默认解析目标。
 
 ### 安全/权限
 - **审批账号过滤**：审批卡片中的注册账号/DNS账号仅展示当前域名专员名下启用账号；超管可见全部启用账号。回调执行时再次校验账号归属，避免越权使用他人账号。
@@ -36,6 +37,7 @@
 - **系统管理员申请详情只读**（`backend/app/api/v1/requests.py`、`frontend/src/pages/Requests/Detail.tsx`）：后台申请详情页待审批操作区仅域名专员和超级管理员可见；审批、拒绝、更新申请接口同步收紧为域名专员/超管角色，系统管理员只能查看申请信息。
 - **DNS 审批默认账号选择**（`backend/app/api/v1/feishu.py`、`backend/app/api/v1/requests.py`）：提交 DNS 解析申请时优先读取域名列表中已绑定的 DNS 账号作为默认审批账号；飞书审批卡片默认选中该账号，后台申请详情页也会在待审批状态默认展示该账号，审核人员仍可下拉切换。
 - **域名注册购买链路校正**（`backend/app/adapters/cloudflare.py`、`backend/app/adapters/godaddy.py`、`backend/app/services/execution_service.py`、`backend/app/api/v1/feishu.py`）：Cloudflare 注册改用官方 `/registrar/registrations` 接口与 `domain_name` 字段；GoDaddy 购买按审批选择传递注册年限并使用当前授权时间；注册执行前若查价/可用性检查失败会直接阻断，避免未确认价格时继续购买；GoDaddy 查价失败保留 `ACCESS_DENIED` 等原始错误信息展示到审批卡片。
+- **Cloudflare 注册异步确认**（`backend/app/adapters/cloudflare.py`、`backend/app/services/execution_service.py`）：注册请求改为 `Prefer: respond-async`，提交后轮询 `registration-status` 并反查注册资源；请求超时时不再直接判失败，避免 Cloudflare 已扣费/已注册但系统误报失败或触发重复购买。
 - **域名页 DNS 操作**（`frontend/src/pages/Domains/index.tsx`、`frontend/src/pages/Domains/Detail.tsx`）：域名列表 DNS 按钮改为跳转详情页 DNS 区域，避免 `/dns` 未配置路由导致 404；详情页“查看 DNS 记录”按钮接入 `/api/v1/dns/domain/{domain_id}` 并展示记录列表。
 - **域名购买报价原始原因展示**（`backend/app/api/v1/feishu.py`）：注册商返回域名不可注册时，飞书审批卡片报价保留原始 `message`（如 `domain_unavailable`），方便审核人员快速定位问题。
 - **飞书文档主域名识别**（`backend/app/services/feishu_doc_parser.py`）：支持 `2、域名` 下一行填写主域名的文档格式，避免新需求文档提示“未能从文档中解析出主域名”。

@@ -302,6 +302,10 @@ class ExecutionService:
             "order_id": reg.get("order_id"),
             "registration_date": reg.get("registration_date"),
             "expiration_date": reg.get("expiration_date"),
+            "registration_pending": bool(reg.get("registration_pending")),
+            "registration_unknown": bool(reg.get("registration_unknown")),
+            "message": reg.get("message"),
+            "workflow_state": reg.get("workflow_state"),
             "price": avail.get("price"),
             "currency": avail.get("currency"),
             "registrar_code": registrar_code,
@@ -310,9 +314,11 @@ class ExecutionService:
 
     def _create_domain_record(self, request: Request, account, reg: Dict[str, Any]) -> None:
         existing = self.db.query(Domain).filter(Domain.name == request.domain_name).first()
+        domain_status = "pending" if reg.get("registration_pending") else "active"
         if existing:
             existing.registrar_code = account.registrar_code
             existing.reg_account_id = account.id
+            existing.status = domain_status
             existing.registration_date = self._parse_date(reg.get("registration_date")) or existing.registration_date
             existing.expiration_date = self._parse_date(reg.get("expiration_date")) or existing.expiration_date
             existing.owner_id = account.owner_id or existing.owner_id
@@ -323,7 +329,7 @@ class ExecutionService:
                 reg_account_id=account.id,
                 dns_provider_code=request.selected_dns_provider_code,
                 dns_account_id=request.selected_dns_account_id,
-                status="active",
+                status=domain_status,
                 registration_date=self._parse_date(reg.get("registration_date")),
                 expiration_date=self._parse_date(reg.get("expiration_date")),
                 owner_id=account.owner_id,
@@ -342,12 +348,19 @@ class ExecutionService:
         # 业务同事：简化通知（不含技术细节）
         if requester:
             if success:
-                title = f"✅ 您的{type_label}申请已完成"
-                color = "green"
+                is_register_pending = request.type == "domain_register" and result.get("registration_pending")
+                title = (
+                    f"⏳ 您的{type_label}申请已提交"
+                    if is_register_pending else
+                    f"✅ 您的{type_label}申请已完成"
+                )
+                color = "orange" if is_register_pending else "green"
                 body = (
                     f"**域名**：{request.domain_name}\n"
                     f"**处理时间**：{processed_time}"
                 )
+                if is_register_pending and result.get("message"):
+                    body += f"\n**状态**：{result['message']}"
             else:
                 failure_reason = self._summarize_failure(result)
                 title = f"❌ 您的{type_label}申请未能完成"
@@ -376,6 +389,8 @@ class ExecutionService:
             is_partial = False
         if is_partial:
             icon, label, color = "⚠️", "部分成功", "orange"
+        elif request.type == "domain_register" and success and result.get("registration_pending"):
+            icon, label, color = "⏳", "已提交", "orange"
         elif success:
             icon, label, color = "✅", "成功", "green"
         else:
@@ -391,6 +406,10 @@ class ExecutionService:
             if result.get("price") is not None:
                 lines.append(f"**价格**：{result.get('price')} {result.get('currency', '')}".strip())
             if success:
+                if result.get("message"):
+                    lines.append(f"**状态**：{result['message']}")
+                if result.get("workflow_state"):
+                    lines.append(f"**工作流状态**：{result['workflow_state']}")
                 if result.get("expiration_date"):
                     lines.append(f"**到期时间**：{result['expiration_date']}")
                 if result.get("order_id"):

@@ -50,8 +50,8 @@ class FeishuDocParser:
 
     def __init__(self):
         self.base_url = "https://open.feishu.cn"
-        self.app_id = Config.FEISHU_DOC_APP_ID
-        self.app_secret = Config.FEISHU_DOC_APP_SECRET
+        self.app_id = Config.FEISHU_APP_ID
+        self.app_secret = Config.FEISHU_APP_SECRET
         self._tenant_token: Optional[str] = None
 
     def parse(self, doc_url: str, action: str, doc_format: str = "standard_v1") -> ParsedDocRequest:

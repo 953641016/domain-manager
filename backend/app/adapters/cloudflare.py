@@ -1,9 +1,11 @@
 ﻿"""
 Cloudflare注册商和DNS解析适配器
 """
-import requests
 import re
+import time
 from typing import Optional, List, Dict, Any
+
+import requests
 from app.adapters.base import BaseRegistrarAdapter, BaseDnsProviderAdapter
 
 
@@ -15,6 +17,9 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
         self.account_id = account_id
         self.base_url = "https://api.cloudflare.com/client/v4"
         self.timeout = 4
+        self.registration_submit_timeout = 15
+        self.registration_poll_timeout = 60
+        self.registration_poll_interval = 3
 
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
@@ -22,6 +27,165 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
         }
+
+    @staticmethod
+    def _format_cloudflare_errors(errors: Any, fallback: str = "Cloudflare API 调用失败") -> str:
+        if not errors:
+            return fallback
+        return str(errors)
+
+    @staticmethod
+    def _workflow_state(result: Dict[str, Any]) -> str:
+        return str(result.get("state") or result.get("status") or "").lower()
+
+    @classmethod
+    def _is_workflow_succeeded(cls, result: Dict[str, Any]) -> bool:
+        state = cls._workflow_state(result)
+        return state in {"succeeded", "success", "completed", "complete", "registered", "done"}
+
+    @classmethod
+    def _is_workflow_failed(cls, result: Dict[str, Any]) -> bool:
+        state = cls._workflow_state(result)
+        return state in {"failed", "failure", "errored", "error", "cancelled", "canceled"}
+
+    @staticmethod
+    def _registration_context(result: Dict[str, Any]) -> Dict[str, Any]:
+        return ((result.get("context") or {}).get("registration") or {})
+
+    def _registration_payload(
+        self,
+        domain: str,
+        result: Optional[Dict[str, Any]],
+        message: str,
+        *,
+        pending: bool = False,
+        unknown: bool = False,
+    ) -> Dict[str, Any]:
+        result = result or {}
+        registration = self._registration_context(result)
+        return {
+            "success": True,
+            "domain": domain,
+            "order_id": result.get("id") or result.get("workflow_id"),
+            "registration_date": (
+                registration.get("created_at")
+                or result.get("created_at")
+                or result.get("registration_date")
+            ),
+            "expiration_date": (
+                registration.get("expires_at")
+                or result.get("expires_at")
+                or result.get("expiration_date")
+            ),
+            "registration_pending": pending,
+            "registration_unknown": unknown,
+            "workflow_state": self._workflow_state(result),
+            "message": message,
+        }
+
+    def _get_registration_status(self, domain: str) -> Optional[Dict[str, Any]]:
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/registrations/{domain}/registration-status"
+        response = requests.get(url, headers=self._get_headers(), timeout=self.timeout)
+        data = response.json()
+        if data.get("success"):
+            return data.get("result") or {}
+        return None
+
+    def _get_registration_resource(self, domain: str) -> Optional[Dict[str, Any]]:
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/registrations/{domain}"
+        response = requests.get(url, headers=self._get_headers(), timeout=self.timeout)
+        data = response.json()
+        if data.get("success"):
+            return data.get("result") or {}
+        return None
+
+    def _wait_for_registration(self, domain: str, initial_result: Dict[str, Any]) -> Dict[str, Any]:
+        deadline = time.monotonic() + self.registration_poll_timeout
+        last_result = initial_result or {}
+
+        while time.monotonic() < deadline:
+            try:
+                status = self._get_registration_status(domain)
+            except Exception:
+                status = None
+
+            if status is not None:
+                last_result = status
+                if self._is_workflow_failed(status):
+                    return {
+                        "success": False,
+                        "domain": domain,
+                        "message": f"注册工作流失败: {status}",
+                    }
+                if self._is_workflow_succeeded(status) or status.get("completed") is True:
+                    try:
+                        resource = self._get_registration_resource(domain)
+                    except Exception:
+                        resource = None
+                    return self._registration_payload(
+                        domain,
+                        resource or status,
+                        "注册成功",
+                    )
+
+                state = self._workflow_state(status)
+                if state == "action_required":
+                    return self._registration_payload(
+                        domain,
+                        status,
+                        f"Cloudflare 注册工作流需要人工处理: {status}",
+                        pending=True,
+                    )
+
+            try:
+                resource = self._get_registration_resource(domain)
+            except Exception:
+                resource = None
+            if resource:
+                return self._registration_payload(domain, resource, "注册成功")
+
+            time.sleep(self.registration_poll_interval)
+
+        return self._registration_payload(
+            domain,
+            last_result,
+            f"Cloudflare 已受理注册请求，仍在处理中: {last_result}",
+            pending=True,
+        )
+
+    def _recover_uncertain_registration(self, domain: str, reason: str) -> Dict[str, Any]:
+        try:
+            resource = self._get_registration_resource(domain)
+        except Exception:
+            resource = None
+        if resource:
+            return self._registration_payload(domain, resource, "注册成功")
+
+        try:
+            status = self._get_registration_status(domain)
+        except Exception:
+            status = None
+        if status:
+            if self._is_workflow_failed(status):
+                return {
+                    "success": False,
+                    "domain": domain,
+                    "message": f"注册工作流失败: {status}",
+                }
+            return self._registration_payload(
+                domain,
+                status,
+                f"注册请求已提交，等待 Cloudflare 完成。原始异常: {reason}",
+                pending=True,
+            )
+
+        return self._registration_payload(
+            domain,
+            {},
+            f"注册请求结果未确认，系统已避免自动重试，请到 Cloudflare Registrar 核对最终状态。原始异常: {reason}",
+            pending=True,
+            unknown=True,
+        )
 
     def check_domain_availability(self, domain: str) -> Dict[str, Any]:
         """检查域名是否可注册"""
@@ -90,27 +254,41 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
             payload["nameservers"] = nameservers
 
         try:
-            response = requests.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
+            headers = {**self._get_headers(), "Prefer": "respond-async"}
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=self.registration_submit_timeout,
+            )
             data = response.json()
 
             if data.get("success"):
                 result = data.get("result", {})
-                registration = ((result.get("context") or {}).get("registration") or {})
-                return {
-                    "success": True,
-                    "domain": domain,
-                    "order_id": result.get("id") or result.get("workflow_id"),
-                    "registration_date": registration.get("created_at") or result.get("created_at"),
-                    "expiration_date": registration.get("expires_at") or result.get("expires_at"),
-                    "message": "注册成功" if result.get("completed", True) else "注册已提交，等待 Cloudflare 完成"
-                }
+                if self._is_workflow_failed(result):
+                    return {
+                        "success": False,
+                        "domain": domain,
+                        "message": f"注册工作流失败: {result}",
+                    }
+                if response.status_code == 201 or self._is_workflow_succeeded(result):
+                    return self._registration_payload(domain, result, "注册成功")
+                return self._wait_for_registration(domain, result)
             else:
                 errors = data.get("errors", [])
                 return {
                     "success": False,
                     "domain": domain,
-                    "message": f"注册失败: {errors}"
+                    "message": f"注册失败: {self._format_cloudflare_errors(errors)}"
                 }
+        except requests.exceptions.Timeout as e:
+            return self._recover_uncertain_registration(domain, str(e))
+        except requests.exceptions.RequestException as e:
+            return {
+                "success": False,
+                "domain": domain,
+                "message": f"注册请求失败: {str(e)}"
+            }
         except Exception as e:
             return {
                 "success": False,
@@ -154,10 +332,29 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
 
     def get_domain_info(self, domain: str) -> Dict[str, Any]:
         """获取域名信息"""
-        url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains/{domain}"
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/registrations/{domain}"
 
         try:
             response = requests.get(url, headers=self._get_headers(), timeout=self.timeout)
+            data = response.json()
+
+            if data.get("success"):
+                result = data.get("result", {})
+                return {
+                    "domain": domain,
+                    "status": result.get("status") or "active",
+                    "registration_date": result.get("created_at") or result.get("registration_date"),
+                    "expiration_date": result.get("expires_at") or result.get("expiration_date"),
+                    "nameservers": result.get("nameservers", []),
+                    "contacts": result.get("contacts", {}),
+                    "auto_renew": result.get("auto_renew", False)
+                }
+        except Exception:
+            pass
+
+        legacy_url = f"{self.base_url}/accounts/{self.account_id}/registrar/domains/{domain}"
+        try:
+            response = requests.get(legacy_url, headers=self._get_headers(), timeout=self.timeout)
             data = response.json()
 
             if data.get("success"):
@@ -171,9 +368,8 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
                     "contacts": result.get("contacts", {}),
                     "auto_renew": result.get("auto_renew", False)
                 }
-            else:
-                return None
-        except Exception as e:
+            return None
+        except Exception:
             return None
 
     def update_nameservers(self, domain: str, nameservers: List[str]) -> Dict[str, Any]:

@@ -192,6 +192,9 @@ async def feishu_webhook(request: Request):
             await feishu_bot.handle_message(event)
             return {"success": True, "message": "消息已接收"}
 
+        if event_type == "application.bot.menu_v6":
+            return await _handle_bot_menu_event(request_body)
+
         # 处理卡片按钮回调（超管点击授权/拒绝账号操作）
         if request_body.get("type") == "card" or event_type == "card.action.trigger":
             _log.info("feishu card action received")
@@ -615,6 +618,16 @@ def _reg_account_options_with_prices(accounts: List[Any], quotes: Dict[str, Dict
     return options
 
 
+def _reg_account_options(accounts: List[Any]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "text": {"tag": "plain_text", "content": _reg_account_label(account)},
+            "value": str(account.id),
+        }
+        for account in accounts
+    ]
+
+
 def _reg_price_quote_lines(accounts: List[Any], quotes: Dict[str, Dict[str, Any]]) -> str:
     lines = []
     for account in accounts:
@@ -622,6 +635,168 @@ def _reg_price_quote_lines(accounts: List[Any], quotes: Dict[str, Dict[str, Any]
         price_text = _format_price_quote(quote)
         lines.append(f"- **{_registrar_display_name(account.registrar_code)} | {_short_account_name(account.name)}**：{price_text}")
     return "\n".join(lines) or "暂无可用注册服务商报价"
+
+
+def _is_direct_register_menu_key(event_key: str) -> bool:
+    return (event_key or "").strip() in {
+        "direct_domain_register",
+        "domain_direct_register",
+        "domain_register_direct",
+        "register_domain_direct",
+    }
+
+
+def _extract_operator_ids(operator: Dict[str, Any]) -> Dict[str, str]:
+    operator_id = operator.get("operator_id") if isinstance(operator.get("operator_id"), dict) else {}
+    sender_id = operator.get("sender_id") if isinstance(operator.get("sender_id"), dict) else {}
+    return {
+        "open_id": (
+            operator.get("open_id")
+            or operator_id.get("open_id")
+            or sender_id.get("open_id")
+            or ""
+        ),
+        "user_id": (
+            operator.get("user_id")
+            or operator_id.get("user_id")
+            or sender_id.get("user_id")
+            or ""
+        ),
+        "union_id": (
+            operator.get("union_id")
+            or operator_id.get("union_id")
+            or sender_id.get("union_id")
+            or ""
+        ),
+    }
+
+
+def _extract_menu_context(body: Dict[str, Any]) -> Dict[str, Any]:
+    event = body.get("event") or {}
+    operator = event.get("operator") or event.get("sender") or body.get("operator") or {}
+    operator_ids = _extract_operator_ids(operator)
+    return {
+        "event_key": (
+            event.get("event_key")
+            or (event.get("menu") or {}).get("event_key")
+            or (event.get("menu_item") or {}).get("event_key")
+            or ""
+        ),
+        "open_id": operator_ids.get("open_id") or "",
+        "user_id": operator_ids.get("user_id") or "",
+        "chat_id": (
+            event.get("open_chat_id")
+            or event.get("chat_id")
+            or (event.get("context") or {}).get("open_chat_id")
+            or ""
+        ),
+    }
+
+
+def _message_target_from_menu_context(context: Dict[str, Any]) -> tuple[str, str]:
+    if context.get("open_id"):
+        return context["open_id"], "open_id"
+    if context.get("user_id"):
+        return context["user_id"], "user_id"
+    if context.get("chat_id"):
+        return context["chat_id"], "chat_id"
+    return "", "open_id"
+
+
+def _build_permission_denied_card(user_name: str = "") -> Dict[str, Any]:
+    name = user_name or "当前用户"
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "⛔ 无权自主注册域名"},
+            "template": "red",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**用户**：{name}\n"
+                        "**原因**：仅域名专员和超级管理员可以直接注册域名。\n"
+                        "如需注册，请通过飞书申请流程提交。"
+                    ),
+                },
+            }
+        ],
+    }
+
+
+def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str, Any]:
+    account_options = _reg_account_options(accounts)
+    default_option = account_options[0].get("text", {}).get("content") if account_options else ""
+    return {
+        "config": {"wide_screen_mode": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": "🛒 自主注册域名"},
+            "template": "orange",
+        },
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "lark_md",
+                    "content": (
+                        f"**操作人**：{operator.name}\n"
+                        "**说明**：提交后将立即查价、校验可注册状态并执行注册，不再走审批流程。\n"
+                        "**日志**：提交和执行结果都会写入操作日志。"
+                    ),
+                },
+            },
+            {"tag": "hr"},
+            {
+                "tag": "form",
+                "name": "direct_domain_register_form",
+                "elements": [
+                    {
+                        "tag": "input",
+                        "name": "domain_name",
+                        "placeholder": {"tag": "plain_text", "content": "要注册的域名，例如 example.com"},
+                        "required": True,
+                    },
+                    {
+                        "tag": "select_static",
+                        "placeholder": {"tag": "plain_text", "content": "选择注册服务商账号"},
+                        "initial_option": default_option,
+                        "options": account_options,
+                        "name": "selected_reg_account_id",
+                        "required": True,
+                    },
+                    {
+                        "tag": "select_static",
+                        "placeholder": {"tag": "plain_text", "content": "选择注册年限"},
+                        "initial_option": "1 年",
+                        "options": [
+                            {"text": {"tag": "plain_text", "content": "1 年"}, "value": "1"},
+                            {"text": {"tag": "plain_text", "content": "2 年"}, "value": "2"},
+                            {"text": {"tag": "plain_text", "content": "3 年"}, "value": "3"},
+                        ],
+                        "name": "register_years",
+                        "required": True,
+                    },
+                    {
+                        "tag": "input",
+                        "name": "registrant_json",
+                        "placeholder": {"tag": "plain_text", "content": "注册联系人 JSON（可选，默认使用服务商账号默认信息）"},
+                    },
+                    {
+                        "tag": "button",
+                        "name": "submit_direct_domain_register",
+                        "action_type": "form_submit",
+                        "text": {"tag": "plain_text", "content": "✅ 提交并注册"},
+                        "type": "primary",
+                        "value": {"action": "submit_direct_domain_register"},
+                    },
+                ],
+            },
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "自主注册仅限域名专员/超级管理员；请确认域名拼写无误。"}]},
+        ],
+    }
 
 
 def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: List[Any]) -> Dict[str, Any]:
@@ -1349,6 +1524,10 @@ async def _handle_card_action(body: dict) -> dict:
             form_values = _extract_card_form_values(body)
             return await _handle_doc_request_card_action(card_action, value, form_values, operator)
 
+        if card_action == "submit_direct_domain_register":
+            form_values = _extract_card_form_values(body)
+            return await _handle_direct_domain_register_action(value, form_values, operator)
+
         confirmation_id = value.get("confirmation_id")
         if not confirmation_id or card_action not in ("approve_account_op", "reject_account_op"):
             return {"success": True, "message": "非账号授权卡片，忽略"}
@@ -1457,6 +1636,216 @@ def _execute_request_in_background(request_id: str, label: str) -> None:
             db.close()
 
     threading.Thread(target=runner, name=f"feishu-{label}-{request_id[:8]}", daemon=True).start()
+
+
+async def _handle_bot_menu_event(body: dict) -> dict:
+    """处理机器人底部菜单事件。当前支持域名自主注册入口。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    context = _extract_menu_context(body)
+    event_key = context.get("event_key") or ""
+    if not _is_direct_register_menu_key(event_key):
+        return {"success": True, "message": "菜单事件已接收"}
+
+    receive_id, receive_type = _message_target_from_menu_context(context)
+    if not receive_id:
+        logger.warning("飞书菜单事件缺少可回复对象: %s", body)
+        return {"success": False, "message": "缺少可回复对象"}
+
+    db = SessionLocal()
+    try:
+        from app.services.user_service import UserService
+        from app.services.audit_service import AuditService
+
+        user_svc = UserService(db)
+        operator = (
+            user_svc.get_user_by_any_feishu_id(context.get("open_id") or "")
+            or user_svc.get_user_by_any_feishu_id(context.get("user_id") or "")
+        )
+        if not operator or not operator.is_active or operator.role not in ("domain_spec", "super_admin"):
+            card = _build_permission_denied_card(getattr(operator, "name", "") if operator else "未绑定用户")
+            feishu_service.send_card_message(receive_id, card, receive_type)
+            return {"success": True, "message": "已发送无权限提示"}
+
+        accounts = _get_reviewable_reg_accounts(db, operator)
+        if not accounts:
+            card = {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": "⚠️ 暂无可用注册账号"},
+                    "template": "orange",
+                },
+                "elements": [
+                    {
+                        "tag": "div",
+                        "text": {
+                            "tag": "lark_md",
+                            "content": "当前账号没有可用于自主注册的注册服务商账号，请先在后台配置并通过超管确认。",
+                        },
+                    }
+                ],
+            }
+            feishu_service.send_card_message(receive_id, card, receive_type)
+            return {"success": True, "message": "已发送账号缺失提示"}
+
+        result = feishu_service.send_card_message(
+            receive_id,
+            _build_direct_register_form_card(operator, accounts),
+            receive_type,
+        )
+        AuditService(db).log(
+            action="open_direct_domain_register_form",
+            resource_type="feishu_menu",
+            resource_name="自主注册域名",
+            user_id=operator.id,
+            user_name=operator.name,
+            status="success" if result.get("code") == 0 else "failed",
+            error_message=None if result.get("code") == 0 else str(result),
+        )
+        return {
+            "success": result.get("code") == 0,
+            "message": "自主注册表单已发送" if result.get("code") == 0 else "发送自主注册表单失败",
+            "feishu_code": result.get("code"),
+        }
+    except Exception as e:
+        logger.exception("处理飞书菜单自主注册入口失败")
+        return {"success": False, "message": str(e)}
+    finally:
+        db.close()
+
+
+def _normalize_domain_name(value: Any) -> str:
+    import re
+    from urllib.parse import urlparse
+
+    domain = str(value or "").strip().lower().strip(".")
+    if not domain:
+        return ""
+    if "://" in domain:
+        parsed = urlparse(domain)
+        domain = parsed.netloc or parsed.path
+    domain = domain.split("/", 1)[0].split("?", 1)[0].strip().strip(".")
+    if domain.startswith("www."):
+        domain = domain[4:]
+    if domain.startswith("*."):
+        domain = domain[2:]
+    if not re.fullmatch(r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{1,62}", domain):
+        return ""
+    return domain
+
+
+def _parse_registrant_json(value: str) -> Dict[str, Any]:
+    import json
+
+    text = (value or "").strip()
+    if not text:
+        return {}
+    parsed = json.loads(text)
+    if not isinstance(parsed, dict):
+        raise ValueError("注册联系人 JSON 必须是对象")
+    return parsed
+
+
+async def _handle_direct_domain_register_action(value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
+    """处理域名专员/超管通过机器人菜单发起的自主注册表单提交。"""
+    import logging
+    logger = logging.getLogger(__name__)
+
+    operator_ids = _extract_operator_ids(operator)
+    operator_feishu_id = operator_ids.get("open_id") or operator_ids.get("user_id") or ""
+
+    db = SessionLocal()
+    try:
+        from app.models.domain import Domain, RegAccount
+        from app.schemas.request import RequestCreate
+        from app.services.audit_service import AuditService
+        from app.services.request_service import RequestService
+        from app.services.user_service import UserService
+
+        user_svc = UserService(db)
+        req_svc = RequestService(db)
+        audit_svc = AuditService(db)
+
+        specialist = user_svc.get_user_by_any_feishu_id(operator_feishu_id)
+        if not specialist or not specialist.is_active or specialist.role not in ("domain_spec", "super_admin"):
+            return {"toast": {"type": "error", "content": "只有域名专员或超级管理员可以自主注册域名"}}
+
+        domain = _normalize_domain_name(form_values.get("domain_name"))
+        if not domain:
+            return {"toast": {"type": "error", "content": "请输入有效域名，例如 example.com"}}
+
+        account_id = _as_int(form_values.get("selected_reg_account_id"))
+        if not account_id:
+            return {"toast": {"type": "error", "content": "请选择注册服务商账号"}}
+
+        account = db.query(RegAccount).filter(RegAccount.id == account_id, RegAccount.is_active == True).first()  # noqa: E712
+        if not account or (specialist.role != "super_admin" and account.owner_id != specialist.id):
+            return {"toast": {"type": "error", "content": "无权使用该注册服务商账号"}}
+
+        existing_domain = db.query(Domain).filter(Domain.name == domain).first()
+        if existing_domain:
+            return {"toast": {"type": "error", "content": f"{domain} 已在域名列表中，已阻止重复注册"}}
+
+        existing_request = req_svc.get_active_domain_register_request(domain)
+        if existing_request:
+            return {"toast": {"type": "error", "content": f"{domain} 已存在待处理或已完成的注册申请，已阻止重复注册"}}
+
+        try:
+            register_years = int(_as_text(form_values.get("register_years")) or "1")
+        except ValueError:
+            register_years = 1
+        register_years = max(1, min(register_years, 10))
+
+        try:
+            registrant = _parse_registrant_json(_as_text(form_values.get("registrant_json")))
+        except Exception as e:
+            return {"toast": {"type": "error", "content": f"注册联系人 JSON 格式错误: {str(e)}"}}
+
+        request_data = {
+            "action": "direct_domain_register",
+            "action_label": "自主注册域名",
+            "domain": domain,
+            "register_years": register_years,
+            "registrant": registrant,
+            "initiator_role": specialist.role,
+        }
+        req = req_svc.create_request(
+            data=RequestCreate(
+                type="domain_register",
+                domain_name=domain,
+                request_data=request_data,
+                selected_registrar_code=account.registrar_code,
+                selected_reg_account_id=account.id,
+                source="feishu_specialist_menu",
+            ),
+            requester_id=specialist.id,
+            requester_name=specialist.name,
+        )
+        req_svc.approve_request(req.id, specialist.id, specialist.name, comment="飞书菜单自主注册")
+        audit_svc.log(
+            action="direct_domain_register_submitted",
+            resource_type="request",
+            resource_id=req.id,
+            resource_name=domain,
+            user_id=specialist.id,
+            user_name=specialist.name,
+            after_state={
+                "domain": domain,
+                "registrar_code": account.registrar_code,
+                "reg_account_id": account.id,
+                "register_years": register_years,
+                "source": "feishu_specialist_menu",
+            },
+            status="success",
+        )
+        _execute_request_in_background(req.id, "direct-domain-register")
+        return {"toast": {"type": "success", "content": f"已提交 {domain} 自主注册，正在执行"}}
+    except Exception as e:
+        logger.exception("处理自主注册表单失败")
+        return {"toast": {"type": "error", "content": f"处理失败: {str(e)}"}}
+    finally:
+        db.close()
 
 
 def _process_confirmation_in_background(
