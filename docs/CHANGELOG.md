@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **Cloudflare Token 权限说明**（`docs/CLOUDFLARE_TOKEN_PERMISSIONS.md`、`frontend/src/pages/Help/CloudflareTokenPermissions.tsx`）：新增 Cloudflare DNS 解析、重定向规则和 Registrar Token 最小权限配置说明；后台新增 `/help/cloudflare-token-permissions` 可读页面，并在 DNS账号管理页提供入口。
 - **飞书菜单自主注册域名**（`backend/app/api/v1/feishu.py`）：支持机器人底部菜单事件触发“自主注册域名”入口；域名专员/超级管理员点击后返回飞书表单卡片，可填写域名、注册账号、年限和可选联系人 JSON，提交后直接创建并批准注册申请，后台执行注册、发送结果卡片并写入操作日志；无权限用户会收到无权限提示卡片。
 - **DNS 记录同步合并逻辑**（`backend/app/tasks/scheduler.py`）：定时同步远程 DNS 记录时不再只计数，会将服务商返回的记录合并到本地表，支持新增、更新、远程缺失记录软删除，并在审计日志中记录新增/更新/删除数量。
 - **基础单元测试**（`pytest.ini`、`backend/tests/`）：新增后端测试入口，覆盖 Web 端业务流程写接口禁用、DNS 记录同步合并、Namecheap/Enom 占位注册商隐藏。
@@ -31,6 +32,7 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **Cloudflare DNS 自检操作提示**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：DNS账号自检失败时返回并展示 Cloudflare 后台权限配置步骤，方便直接按提示补齐 `DNS/Edit`、`Zone/Read` 和重定向规则权限。
 - **Cloudflare DNS 账号自检准确性**（`backend/app/api/v1/domains.py`）：Cloudflare Account API Token 不再用 `/user/tokens/verify` 误判；自检新增 DNS 记录读取权限检查，能提前暴露只有 Zone 列表权限、无法读取/写入 DNS 记录的问题。
 - **飞书文档 Vercel JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：支持 `vercelDomainsRecords` 代码块中的 `host/name/type/value` 结构，避免一键解析申请漏掉 Vercel 根域名与 `www` 记录。
 - **飞书 DNS 审批默认账号兜底**（`backend/app/api/v1/feishu.py`）：飞书卡片未回传 `select_static.initial_option` 时，后端自动使用申请中的 `default_dns_account_id`，避免卡片已显示默认账号但点击批准仍提示“请选择 DNS 账号”。

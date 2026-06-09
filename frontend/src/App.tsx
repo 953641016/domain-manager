@@ -23,6 +23,7 @@ import SslPage from '@/pages/Ssl';
 import StatisticsPage from '@/pages/Statistics';
 import LogsPage from '@/pages/Logs';
 import ConfigPage from '@/pages/Config';
+import CloudflareTokenPermissionsPage from '@/pages/Help/CloudflareTokenPermissions';
 import UserManagement from '@/pages/config/UserManagement';
 import ForbiddenPage from '@/pages/Errors/Forbidden';
 import NotFoundPage from '@/pages/Errors/NotFound';
@@ -158,6 +159,16 @@ function AppRouter() {
 
           {/* 旧版系统配置入口，重定向到用户管理 */}
           <Route path="config" element={<Navigate to="/system/users" replace />} />
+
+          {/* 帮助文档 - 登录后的 Web 角色可读 */}
+          <Route
+            path="help/cloudflare-token-permissions"
+            element={
+              <PermissionRoute allowedRoles={[UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.DOMAIN_SPEC]}>
+                <CloudflareTokenPermissionsPage />
+              </PermissionRoute>
+            }
+          />
         </Route>
 
         {/* 错误页面 */}

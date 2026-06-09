@@ -241,6 +241,17 @@ def _format_provider_error(data, fallback: str = "服务商接口调用失败") 
     return fallback
 
 
+def _cloudflare_dns_token_suggestions() -> list[str]:
+    return [
+        "打开 Cloudflare Dashboard → 管理账户 → 账户 API 令牌，编辑当前 Token。",
+        "在资源范围选择“所有域名”，或仅包含要解析的 Zone（例如 joyai-echo.net）。",
+        "在 DNS & Zones 权限组中勾选 DNS 的 Edit（建议 Read 也勾选）。",
+        "在 DNS & Zones 权限组中勾选 Zone 的 Read。",
+        "如需自动创建 CF 重定向规则，在 Rules & Configuration 中补充对应 Redirect/Rulesets 的 Edit 权限。",
+        "保存后回到域名管家 DNS 账号列表点击“自检”，确认 DNS 记录读取权限通过。",
+    ]
+
+
 def _self_check_reg_account(service: DomainService, account: RegAccount) -> dict:
     decrypted = service.get_reg_account_decrypted(account.id)
     checks = []
@@ -320,6 +331,7 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
 
     checks = []
     if decrypted.provider_code == "cloudflare":
+        suggestions = _cloudflare_dns_token_suggestions()
         headers = {"Authorization": f"Bearer {decrypted.api_key}", "Content-Type": "application/json"}
         is_account_token = str(decrypted.api_key or "").startswith("cfat_")
         if is_account_token:
@@ -407,6 +419,7 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
         "message": "DNS账号自检通过" if success else (failed.get("message") if failed else "DNS账号自检失败"),
         "checks": checks,
         "details": details,
+        **({"suggestions": suggestions} if not success and decrypted.provider_code == "cloudflare" else {}),
     }
 
 

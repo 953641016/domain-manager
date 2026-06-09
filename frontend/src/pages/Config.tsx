@@ -10,6 +10,7 @@
  *   - super_admin：可见全部账号（含归属专员列）；新建时可指定归属专员
  */
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { api } from '@/api/client';
 import UserManagement from './config/UserManagement';
 import { formatDateTime } from '@/utils/datetime';
@@ -428,7 +429,14 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
       .filter(([, value]) => value !== undefined && value !== null && value !== '')
       .map(([key, value]) => `${key}: ${value}`);
 
-    return [...lines, ...(detailLines.length ? ['', '详情：', ...detailLines] : [])].join('\n');
+    const suggestions = Array.isArray(result?.suggestions) ? result.suggestions : [];
+    const suggestionLines = suggestions.map((item: string, index: number) => `${index + 1}. ${item}`);
+
+    return [
+      ...lines,
+      ...(suggestionLines.length ? ['', '建议操作：', ...suggestionLines] : []),
+      ...(detailLines.length ? ['', '详情：', ...detailLines] : []),
+    ].join('\n');
   };
 
   const handleSelfCheck = async (type: 'reg' | 'dns', account: RegAccount | DnsAccount) => {
@@ -1212,10 +1220,26 @@ export default function ConfigPage({ sections, title = '系统配置' }: ConfigP
           {activeTab === 'dns-accounts' && (
             <div className="space-y-6">
               <div className="flex justify-between items-center">
-                <h2 className="text-lg font-semibold">DNS账号管理</h2>
-                <button onClick={() => openDnsModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  新增账号
-                </button>
+                <div>
+                  <h2 className="text-lg font-semibold">DNS账号管理</h2>
+                  <Link
+                    to="/help/cloudflare-token-permissions"
+                    className="mt-1 inline-flex text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    查看 Cloudflare 权限说明
+                  </Link>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Link
+                    to="/help/cloudflare-token-permissions"
+                    className="hidden sm:inline-flex border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium"
+                  >
+                    权限说明
+                  </Link>
+                  <button onClick={() => openDnsModal()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                    新增账号
+                  </button>
+                </div>
               </div>
               <p className="text-sm text-gray-500">
                 {isSuperAdmin
