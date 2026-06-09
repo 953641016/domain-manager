@@ -411,7 +411,7 @@ def submit_doc_button_request(
             existing.request_data = existing_data
             db.commit()
             db.refresh(existing)
-            send_result = _send_doc_request_approval_card(existing, applicant, specialist, accounts)
+            send_result = _send_doc_request_approval_card(existing, applicant, specialist, accounts, db)
             return {
                 "success": True,
                 "resent": True,
@@ -435,7 +435,7 @@ def submit_doc_button_request(
         requester_name=applicant.name,
     )
 
-    result = _send_doc_request_approval_card(req, applicant, specialist, accounts)
+    result = _send_doc_request_approval_card(req, applicant, specialist, accounts, db)
 
     return {
         "success": True,
@@ -446,7 +446,7 @@ def submit_doc_button_request(
     }
 
 
-def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[Any]) -> Dict[str, Any]:
+def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[Any], db: Session) -> Dict[str, Any]:
     if req.type == "domain_register":
         card = _build_domain_purchase_approval_card(req, applicant, specialist, accounts)
     else:
@@ -459,6 +459,11 @@ def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[A
     result = feishu_service.send_card_message(receive_id, card, receive_type)
     if result.get("code") != 0:
         raise HTTPException(status_code=502, detail=f"发送审批卡片失败: {result}")
+    msg_id = (result.get("data") or {}).get("message_id")
+    if msg_id:
+        req.feishu_message_id = msg_id
+        db.commit()
+        db.refresh(req)
     return result
 
 
@@ -706,7 +711,7 @@ def _message_target_from_menu_context(context: Dict[str, Any]) -> tuple[str, str
 def _build_permission_denied_card(user_name: str = "") -> Dict[str, Any]:
     name = user_name or "当前用户"
     return {
-        "config": {"wide_screen_mode": True},
+        "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "⛔ 无权自主注册域名"},
             "template": "red",
@@ -731,7 +736,7 @@ def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str,
     account_options = _reg_account_options(accounts)
     default_option = account_options[0].get("text", {}).get("content") if account_options else ""
     return {
-        "config": {"wide_screen_mode": True},
+        "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "🛒 自主注册域名"},
             "template": "orange",
@@ -808,7 +813,7 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
     initial_option = next((opt for opt in account_options if opt.get("value") == default_account_id), account_options[0])
     initial_option_text = initial_option.get("text", {}).get("content") or ""
     return {
-        "config": {"wide_screen_mode": True},
+        "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "🛒 域名购买申请"},
             "template": "orange",
@@ -927,7 +932,7 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
     )
     initial_option_text = initial_option.get("text", {}).get("content") or ""
     return {
-        "config": {"wide_screen_mode": True},
+        "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
             "title": {"tag": "plain_text", "content": "🌐 DNS 解析申请"},
             "template": "blue",
@@ -1389,7 +1394,7 @@ def submit_request(
         receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
         if receive_id:
             if req_type == "dns_record":
-                feishu_service.send_dns_approval_card(
+                send_result = feishu_service.send_dns_approval_card(
                     receive_id=receive_id,
                     request_id=req.id,
                     requester_name=current_user.name,
@@ -1399,6 +1404,11 @@ def submit_request(
                     receive_id_type=receive_type,
                     application_time=req.created_at,
                 )
+                msg_id = (send_result.get("data") or {}).get("message_id")
+                if msg_id:
+                    req.feishu_message_id = msg_id
+                    db.commit()
+                    db.refresh(req)
             else:
                 feishu_service.send_text_message(
                     receive_id=receive_id,
@@ -1488,16 +1498,21 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
         receive_id = getattr(specialist, "feishu_open_id", None) or getattr(specialist, "feishu_user_id", None)
         receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
         if receive_id:
-            feishu_service.send_dns_approval_card(
+            send_result = feishu_service.send_dns_approval_card(
                 receive_id=receive_id,
                 request_id=req.id,
                 requester_name=user.name,
                 domain=body.domain,
-                    dns_provider=body.dns_provider,
-                    records=records,
-                    receive_id_type=receive_type,
-                    application_time=req.created_at,
-                )
+                dns_provider=body.dns_provider,
+                records=records,
+                receive_id_type=receive_type,
+                application_time=req.created_at,
+            )
+            msg_id = (send_result.get("data") or {}).get("message_id")
+            if msg_id:
+                req.feishu_message_id = msg_id
+                db.commit()
+                db.refresh(req)
 
     return {"success": True, "request_id": req.id, "records_count": len(records)}
 
@@ -1933,7 +1948,8 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
 
         if card_action == "reject_doc_request":
             reason = _as_text(form_values.get("reject_reason")) or "未填写"
-            req_svc.reject_request(request_id, reviewer.id, reviewer.name, reason=reason)
+            req = req_svc.reject_request(request_id, reviewer.id, reviewer.name, reason=reason) or req
+            _update_request_approval_card_rejected(req, applicant, reviewer, reason)
             _notify_request_rejected(req, applicant, reviewer, reason)
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
 
@@ -1973,7 +1989,8 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
         db.commit()
         db.refresh(req)
 
-        req_svc.approve_request(request_id, reviewer.id, reviewer.name)
+        req = req_svc.approve_request(request_id, reviewer.id, reviewer.name) or req
+        _update_request_approval_card_processing(req, applicant, reviewer)
         _execute_request_in_background(request_id, "doc-request")
         return {"toast": {"type": "success", "content": "已批准，正在执行"}}
     except Exception as e:
@@ -2029,6 +2046,79 @@ def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
             pass
 
 
+def _update_request_approval_card_rejected(req, applicant, reviewer, reason: str) -> None:
+    message_id = getattr(req, "feishu_message_id", None)
+    if not message_id:
+        return
+    label = "域名购买申请" if req.type == "domain_register" else "DNS 解析申请"
+    body = (
+        f"**状态**：已拒绝\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**审批人**：{getattr(reviewer, 'name', '未知')}\n"
+        f"**处理时间**：{_format_card_time(getattr(req, 'approved_at', None))}\n"
+        f"**拒绝理由**：{reason or '未填写'}"
+    )
+    card = {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"❌ 已拒绝：{label}"},
+            "template": "red",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，重复点击不会再次执行"}],
+            },
+        ],
+    }
+    try:
+        result = feishu_service.update_card_message(message_id, card)
+        if result.get("code") != 0:
+            import logging
+            logging.getLogger(__name__).warning("更新业务审批拒绝卡片失败: request_id=%s result=%s", req.id, result)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("更新业务审批拒绝卡片异常: request_id=%s", req.id, exc_info=True)
+
+
+def _update_request_approval_card_processing(req, applicant, reviewer) -> None:
+    message_id = getattr(req, "feishu_message_id", None)
+    if not message_id:
+        return
+    label = "域名购买申请" if req.type == "domain_register" else "DNS 解析申请"
+    body = (
+        f"**状态**：已批准，正在执行\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**审批人**：{getattr(reviewer, 'name', '未知')}\n"
+        f"**处理时间**：{_format_card_time(getattr(req, 'approved_at', None))}"
+    )
+    card = {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"⏳ 已批准，正在执行：{label}"},
+            "template": "orange",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，最终结果稍后会自动更新到本卡片"}],
+            },
+        ],
+    }
+    try:
+        result = feishu_service.update_card_message(message_id, card)
+        if result.get("code") != 0:
+            import logging
+            logging.getLogger(__name__).warning("更新业务审批处理中卡片失败: request_id=%s result=%s", req.id, result)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning("更新业务审批处理中卡片异常: request_id=%s", req.id, exc_info=True)
+
+
 async def _handle_dns_card_action(card_action: str, value: dict, operator: dict, form_values: Optional[Dict[str, Any]] = None) -> dict:
     """专员点击 DNS 审批卡片后的处理（批准/拒绝）。"""
     import logging
@@ -2064,13 +2154,16 @@ async def _handle_dns_card_action(card_action: str, value: dict, operator: dict,
                 return {"toast": {"type": "error", "content": "该申请不属于您负责的业务同事"}}
 
         if card_action == "approve_dns_request":
-            req_svc.approve_request(request_id, specialist.id, specialist.name)
+            request = req_svc.approve_request(request_id, specialist.id, specialist.name) or request
+            requester = user_svc.get_user(request.requester_id)
+            _update_request_approval_card_processing(request, requester, specialist)
             _execute_request_in_background(request_id, "dns-request")
             return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
         else:
             reason = _as_text((form_values or {}).get("reject_reason")) or "专员拒绝"
-            req_svc.reject_request(request_id, specialist.id, specialist.name, reason=reason)
+            request = req_svc.reject_request(request_id, specialist.id, specialist.name, reason=reason) or request
             requester = user_svc.get_user(request.requester_id)
+            _update_request_approval_card_rejected(request, requester, specialist, reason)
             _notify_request_rejected(request, requester, specialist, reason)
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
     except Exception as e:

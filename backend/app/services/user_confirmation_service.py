@@ -241,6 +241,7 @@ class UserOperationConfirmationService:
         )
 
         # 通知发起人（如实反映执行结果）
+        self._update_original_confirmation_card(confirmation, approved=True, exec_error=exec_error)
         self._notify_initiator(confirmation, approved=True, exec_error=exec_error)
         self._notify_approver_result(confirmation, approved=True, exec_error=exec_error)
         # 通知目标用户（账号有实际变动 & 执行成功时才通知）
@@ -301,6 +302,7 @@ class UserOperationConfirmationService:
             after_state={"reason": reject_reason, "confirmed_via": "feishu_client"},
         )
 
+        self._update_original_confirmation_card(confirmation, approved=False)
         self._notify_initiator(confirmation, approved=False)
         self._notify_approver_result(confirmation, approved=False)
 
@@ -638,6 +640,99 @@ class UserOperationConfirmationService:
             import logging
             logging.getLogger(__name__).warning("发送通知给审核人失败，user_id=%s", confirmation.approver_user_id)
 
+
+    def _update_original_confirmation_card(
+        self,
+        confirmation: UserOperationConfirmation,
+        approved: bool,
+        exec_error: Optional[str] = None,
+    ) -> None:
+        message_id = getattr(confirmation, "feishu_message_id", None)
+        if not message_id:
+            return
+
+        try:
+            from app.services.feishu_service import FeishuService
+            result = FeishuService().update_card_message(
+                message_id,
+                self._build_processed_confirmation_card(confirmation, approved, exec_error),
+            )
+            if result.get("code") != 0:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "更新原授权卡片失败，confirmation_id=%s, result=%s",
+                    confirmation.id,
+                    result,
+                )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "更新原授权卡片异常，confirmation_id=%s",
+                confirmation.id,
+                exc_info=True,
+            )
+
+    def _build_processed_confirmation_card(
+        self,
+        confirmation: UserOperationConfirmation,
+        approved: bool,
+        exec_error: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        desc = self.format_operation_description(confirmation).replace("【需超级管理员确认】", "").strip()
+        processed_time = self._format_dt(getattr(confirmation, "confirmed_at", None))
+        base_title = self._confirmation_request_title(confirmation)
+
+        if not approved:
+            title = f"❌ 已拒绝：{base_title}"
+            color = "red"
+            status = "已拒绝"
+            extra_lines = [f"**拒绝理由**：{confirmation.reject_reason or '未填写'}"]
+        elif exec_error:
+            title = f"⚠️ 已授权，执行失败：{base_title}"
+            color = "orange"
+            status = "已授权，执行失败"
+            extra_lines = [f"**失败原因**：{self._friendly_error(exec_error)}"]
+        else:
+            title = f"✅ 已授权：{base_title}"
+            color = "green"
+            status = "已授权"
+            extra_lines = []
+
+        body_lines = [
+            f"**状态**：{status}",
+            f"**操作**：{desc}",
+            f"**申请人**：{confirmation.initiator_name}",
+            f"**审批人**：{confirmation.approver_name or '—'}",
+            f"**处理时间**：{processed_time}",
+        ]
+        body_lines.extend(extra_lines)
+
+        return {
+            "config": {"wide_screen_mode": True, "update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": color,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(body_lines)}},
+                {
+                    "tag": "note",
+                    "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，重复点击不会再次执行"}],
+                },
+            ],
+        }
+
+    def _confirmation_request_title(self, confirmation: UserOperationConfirmation) -> str:
+        details = confirmation.operation_details or {}
+        action = details.get("action", "")
+        op_type = confirmation.operation_type
+        if details.get("transfer_super_admin"):
+            return "超管转让授权申请"
+        if action in ("create_user", "update_user", "deactivate_user", "delete_user", "activate_user"):
+            return "用户管理授权申请"
+        if op_type in ("add_provider", "update_provider", "delete_provider"):
+            return "服务商配置授权申请"
+        return "账号配置授权申请"
     def _notify_target_user(
         self,
         confirmation: UserOperationConfirmation,
@@ -1003,7 +1098,7 @@ class UserOperationConfirmationService:
         ])
 
         card = {
-            "config": {"wide_screen_mode": True},
+            "config": {"wide_screen_mode": True, "update_multi": True},
             "header": {
                 "title": {"tag": "plain_text", "content": card_title},
                 "template": card_color,

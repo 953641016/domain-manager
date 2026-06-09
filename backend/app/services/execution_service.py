@@ -464,6 +464,8 @@ class ExecutionService:
         approver = request.approver
         processed_time = self._format_notify_time(getattr(request, "approved_at", None))
 
+        self._update_original_request_card(request, result, type_label, success)
+
         # 业务同事：简化通知（不含技术细节）
         if requester:
             if success:
@@ -577,6 +579,57 @@ class ExecutionService:
             self.feishu.send_card_message(receive_id, card, receive_type)
         except Exception:
             logger.exception("发送飞书卡片通知失败")
+
+    def _update_original_request_card(
+        self,
+        request: Request,
+        result: Dict[str, Any],
+        type_label: str,
+        success: bool,
+    ) -> None:
+        message_id = getattr(request, "feishu_message_id", None)
+        if not message_id:
+            return
+
+        title, color, detail = self._build_specialist_card(request, result, type_label, success)
+        status = self._request_card_status(request, result, success)
+        content = f"**状态**：{status}\n{detail}"
+        card = {
+            "config": {"wide_screen_mode": True, "update_multi": True},
+            "header": {
+                "title": {"tag": "plain_text", "content": title},
+                "template": color,
+            },
+            "elements": [
+                {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                {
+                    "tag": "note",
+                    "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，重复点击不会再次执行"}],
+                },
+            ],
+        }
+        try:
+            update_result = self.feishu.update_card_message(message_id, card)
+            if update_result.get("code") != 0:
+                logger.warning(
+                    "更新原业务审批卡片失败: request_id=%s result=%s",
+                    request.id,
+                    update_result,
+                )
+        except Exception:
+            logger.warning("更新原业务审批卡片异常: request_id=%s", request.id, exc_info=True)
+
+    @staticmethod
+    def _request_card_status(request: Request, result: Dict[str, Any], success: bool) -> str:
+        if request.type == "domain_register" and success and result.get("registration_pending"):
+            return "已提交，待确认"
+        if success:
+            total = result.get("total")
+            success_count = result.get("success_count", 0)
+            if total is not None and 0 < success_count < total:
+                return "部分成功"
+            return "已完成"
+        return "执行失败"
 
     def _send(self, user, content: str) -> None:
         """向用户发送飞书文本消息，失败不影响主流程"""

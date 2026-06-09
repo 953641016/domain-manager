@@ -32,6 +32,8 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **飞书超管审批原卡片状态回写**（`backend/app/services/feishu_service.py`、`backend/app/services/user_confirmation_service.py`）：用户管理/账号配置授权卡片在审批通过或拒绝后，会用原 `message_id` 更新为“已授权/已拒绝/已授权但执行失败”状态并移除操作按钮，同时保留后续结果通知卡片，避免旧卡片看起来仍可审批。
+- **飞书业务审批原卡片状态回写**（`backend/app/api/v1/feishu.py`、`backend/app/services/execution_service.py`）：域名购买、DNS 解析和旧版多维表格 DNS 审批卡片发送后保存 `message_id`；审批通过会先回写为“已批准，正在执行”，拒绝会回写为“已拒绝”，执行完成/失败/异步注册待确认会继续更新同一张原卡片并移除操作按钮。
 - **Cloudflare DNS 自检操作提示**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：DNS账号自检失败时返回并展示 Cloudflare 后台权限配置步骤，方便直接按提示补齐 `DNS/Edit`、`Zone/Read` 和重定向规则权限。
 - **Cloudflare DNS 账号自检准确性**（`backend/app/api/v1/domains.py`）：Cloudflare Account API Token 不再用 `/user/tokens/verify` 误判；自检新增 DNS 记录读取权限检查，能提前暴露只有 Zone 列表权限、无法读取/写入 DNS 记录的问题。
 - **飞书文档 Vercel JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：支持 `vercelDomainsRecords` 代码块中的 `host/name/type/value` 结构，避免一键解析申请漏掉 Vercel 根域名与 `www` 记录。

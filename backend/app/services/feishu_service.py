@@ -253,7 +253,33 @@ class FeishuService:
         
         response = requests.post(url, headers=headers, params=params, json=payload)
         return response.json()
-    
+
+    def update_card_message(
+        self,
+        message_id: str,
+        card_content: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        更新已发送的交互式卡片消息
+
+        Args:
+            message_id: 飞书消息ID
+            card_content: 新卡片内容
+
+        Returns:
+            飞书API响应
+        """
+        url = f"{self.base_url}/open-apis/im/v1/messages/{message_id}"
+        headers = {
+            "Authorization": f"Bearer {self.get_app_access_token()}",
+            "Content-Type": "application/json; charset=utf-8"
+        }
+        payload = {
+            "content": json.dumps(card_content)
+        }
+
+        response = requests.patch(url, headers=headers, json=payload, timeout=10)
+        return response.json()
     def send_domain_alert_card(
         self,
         receive_id: str,
@@ -357,7 +383,7 @@ class FeishuService:
         }.get(dns_provider.lower(), dns_provider)
 
         card = {
-            "config": {"wide_screen_mode": True},
+            "config": {"wide_screen_mode": True, "update_multi": True},
             "header": {
                 "title": {"tag": "plain_text", "content": "🌐 DNS 解析申请"},
                 "template": "blue",
