@@ -1606,6 +1606,16 @@ def _as_int(value: Any) -> Optional[int]:
         return None
 
 
+def _resolve_dns_account_id(form_values: Dict[str, Any], req: Any) -> Optional[int]:
+    """飞书 select_static 未改动时可能不回传 initial_option，使用申请默认账号兜底。"""
+    request_data = dict(getattr(req, "request_data", None) or {})
+    return (
+        _as_int(form_values.get("selected_dns_account_id"))
+        or _as_int(request_data.get("default_dns_account_id"))
+        or _as_int(getattr(req, "selected_dns_account_id", None))
+    )
+
+
 def _as_text(value: Any) -> str:
     if isinstance(value, dict):
         value = value.get("value") or value.get("text") or ""
@@ -1947,7 +1957,7 @@ async def _handle_doc_request_card_action(card_action: str, value: dict, form_va
             request_data["selected_price_quote"] = selected_quote
             req.request_data = request_data
         else:
-            account_id = _as_int(form_values.get("selected_dns_account_id"))
+            account_id = _resolve_dns_account_id(form_values, req)
             if not account_id:
                 return {"toast": {"type": "error", "content": "请选择 DNS 账号"}}
             account = db.query(DnsAccount).filter(DnsAccount.id == account_id, DnsAccount.is_active == True).first()  # noqa: E712

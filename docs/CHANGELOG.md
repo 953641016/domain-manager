@@ -31,6 +31,8 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **飞书文档 Vercel JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：支持 `vercelDomainsRecords` 代码块中的 `host/name/type/value` 结构，避免一键解析申请漏掉 Vercel 根域名与 `www` 记录。
+- **飞书 DNS 审批默认账号兜底**（`backend/app/api/v1/feishu.py`）：飞书卡片未回传 `select_static.initial_option` 时，后端自动使用申请中的 `default_dns_account_id`，避免卡片已显示默认账号但点击批准仍提示“请选择 DNS 账号”。
 - **Web 端业务流程写接口禁用**（`backend/app/api/v1/requests.py`）：`POST /requests`、审批、拒绝、更新、完成、失败等 Web 写接口统一返回 405，申请和审批主流程仅保留飞书入口，Web 后台用于查询、统计和配置。
 - **后台注册商占位项隐藏**（`backend/app/api/v1/registrar.py`、`backend/app/adapters/registrar_factory.py`）：Namecheap/Enom 暂不实现真实适配，注册商列表和旧版列表接口临时隐藏这两个占位项，避免后台误配置；工厂当前支持项收口为 Cloudflare/GoDaddy。
 - **交接文档待办收口**（`docs/项目交接文档.md`）：移除飞书文档侧 Bitable 配置和 Namecheap/Enom 适配器待办，保留当前实际待推进事项。

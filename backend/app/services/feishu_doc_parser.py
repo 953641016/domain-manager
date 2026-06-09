@@ -70,7 +70,7 @@ class FeishuDocParser:
 
         sections = {
             "cf": self._parse_table_section(lines, "CF域名解析", ["Vercel域名解析"]),
-            "vercel": self._parse_vercel(lines),
+            "vercel": self._parse_vercel(lines, domain),
             "clerk": self._parse_clerk(lines, domain),
             "gsc": self._parse_gsc(lines),
             "backend": self._parse_backend(lines, domain),
@@ -285,10 +285,21 @@ class FeishuDocParser:
             idx = max(end, start)
         return records
 
-    def _parse_vercel(self, lines: List[str]) -> List[Dict[str, Any]]:
+    def _parse_vercel(self, lines: List[str], domain: str) -> List[Dict[str, Any]]:
         records = self._parse_table_section(lines, "Vercel域名解析", ["Clerk域名解析"])
         if records:
             return records
+
+        records = self._parse_json_like_records_after_marker(
+            lines,
+            "vercelDomainsRecords",
+            domain,
+            "vercel",
+            ["Clerk DNS", "Clerk域名解析", "后端接口", "GSC", "四、", "接口域名解析"],
+        )
+        if records:
+            return records
+
         section = self._section_lines(lines, "Vercel Dns解析", ["Clerk DNS", "Clerk域名解析"])
         records = []
         for line in section:
@@ -390,17 +401,58 @@ class FeishuDocParser:
 
     def _parse_json_like_records(self, lines: List[str], domain: str, section: str) -> List[Dict[str, Any]]:
         """兼容飞书代码块中的 domainsRecords: host/type/value 结构。"""
+        return self._parse_json_like_records_from_lines(lines, domain, section)
+
+    def _parse_json_like_records_after_marker(
+        self,
+        lines: List[str],
+        marker: str,
+        domain: str,
+        section: str,
+        stop_markers: Optional[List[str]] = None,
+    ) -> List[Dict[str, Any]]:
+        start = None
+        marker_lower = marker.lower()
+        for idx, line in enumerate(lines):
+            if marker_lower in line.lower():
+                start = idx + 1
+                break
+        if start is None:
+            return []
+
+        scoped_lines = []
+        stop_markers = stop_markers or []
+        for line in lines[start:]:
+            if scoped_lines and any(stop_marker in line for stop_marker in stop_markers):
+                break
+            scoped_lines.append(line)
+        return self._parse_json_like_records_from_lines(scoped_lines, domain, section)
+
+    def _parse_json_like_records_from_lines(self, lines: List[str], domain: str, section: str) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
         current: Dict[str, str] = {}
-        field_map = {"host": "host", "hostname": "host", "type": "type", "value": "value", "target": "value"}
+        field_map = {
+            "host": "host",
+            "hostname": "host",
+            "name": "name",
+            "type": "type",
+            "value": "value",
+            "target": "value",
+        }
+        pattern = re.compile(
+            r'["“”]?(host|hostname|name|type|value|target)["“”]?\s*[:：]\s*["“”]([^"“”]+)["“”]',
+            flags=re.I,
+        )
         for line in lines:
-            match = re.search(r'["“”]?(host|hostname|type|value|target)["“”]?\s*[:：]\s*["“”]([^"“”]+)["“”]', line, flags=re.I)
-            if not match:
+            matches = list(pattern.finditer(line))
+            if not matches:
                 continue
-            current[field_map[match.group(1).lower()]] = match.group(2).strip()
-            if {"host", "type", "value"}.issubset(current.keys()):
+            for match in matches:
+                current[field_map[match.group(1).lower()]] = match.group(2).strip()
+            host = current.get("host") or current.get("name")
+            if host and {"type", "value"}.issubset(current.keys()):
                 record = self._record(
-                    self._relative_host(current["host"], domain),
+                    self._relative_host(host, domain),
                     current["type"],
                     current["value"],
                     section,

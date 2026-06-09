@@ -3,6 +3,7 @@ from app.api.v1.feishu import (
     _is_direct_register_menu_key,
     _message_target_from_menu_context,
     _normalize_domain_name,
+    _resolve_dns_account_id,
 )
 
 
@@ -40,3 +41,13 @@ def test_normalize_domain_name_accepts_url_and_strips_www():
     assert _normalize_domain_name("https://www.Example.COM/path?a=1") == "example.com"
     assert _normalize_domain_name("*.demo.app") == "demo.app"
     assert _normalize_domain_name("not a domain") == ""
+
+
+def test_resolve_dns_account_id_falls_back_to_request_default():
+    request = type("RequestStub", (), {
+        "request_data": {"default_dns_account_id": 7},
+        "selected_dns_account_id": None,
+    })()
+
+    assert _resolve_dns_account_id({}, request) == 7
+    assert _resolve_dns_account_id({"selected_dns_account_id": {"value": "9"}}, request) == 9
