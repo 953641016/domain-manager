@@ -321,17 +321,29 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
     checks = []
     if decrypted.provider_code == "cloudflare":
         headers = {"Authorization": f"Bearer {decrypted.api_key}", "Content-Type": "application/json"}
-        try:
-            verify_resp = requests.get("https://api.cloudflare.com/client/v4/user/tokens/verify", headers=headers, timeout=10)
-            verify_data = verify_resp.json()
-        except Exception as e:
-            verify_data = {"success": False, "errors": [str(e)]}
-        verify_ok = bool(verify_data.get("success"))
-        checks.append({
-            "name": "Token 验证",
-            "success": verify_ok,
-            "message": "Token 有效" if verify_ok else _format_provider_error(verify_data, "Token 验证失败"),
-        })
+        is_account_token = str(decrypted.api_key or "").startswith("cfat_")
+        if is_account_token:
+            checks.append({
+                "name": "Token 类型",
+                "success": True,
+                "message": "Cloudflare Account API Token；跳过 /user/tokens/verify",
+            })
+        else:
+            try:
+                verify_resp = requests.get(
+                    "https://api.cloudflare.com/client/v4/user/tokens/verify",
+                    headers=headers,
+                    timeout=10,
+                )
+                verify_data = verify_resp.json()
+            except Exception as e:
+                verify_data = {"success": False, "errors": [str(e)]}
+            verify_ok = bool(verify_data.get("success"))
+            checks.append({
+                "name": "Token 验证",
+                "success": verify_ok,
+                "message": "Token 有效" if verify_ok else _format_provider_error(verify_data, "Token 验证失败"),
+            })
 
         try:
             zones_resp = requests.get(
@@ -350,10 +362,29 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
             "message": "可读取 Zone 列表" if zones_ok else _format_provider_error(zones_data, "Zone 读取失败"),
         })
         result_info = zones_data.get("result_info") or {}
+        sample_zone = ((zones_data.get("result") or [{}])[0] or {}) if zones_ok else {}
         details.update({
             "zone_count": result_info.get("total_count"),
-            "sample_zone": ((zones_data.get("result") or [{}])[0] or {}).get("name") if zones_ok else None,
+            "sample_zone": sample_zone.get("name") if zones_ok else None,
         })
+
+        if zones_ok and sample_zone.get("id"):
+            try:
+                records_resp = requests.get(
+                    f"https://api.cloudflare.com/client/v4/zones/{sample_zone['id']}/dns_records",
+                    headers=headers,
+                    params={"per_page": 1},
+                    timeout=10,
+                )
+                records_data = records_resp.json()
+            except Exception as e:
+                records_data = {"success": False, "errors": [str(e)]}
+            records_ok = bool(records_data.get("success"))
+            checks.append({
+                "name": "DNS 记录读取权限",
+                "success": records_ok,
+                "message": "可读取 DNS 记录" if records_ok else _format_provider_error(records_data, "DNS 记录读取失败"),
+            })
     elif decrypted.provider_code == "dnspod":
         try:
             adapter = RegistrarFactory.create_dns_provider("dnspod", decrypted.api_key, decrypted.api_secret)
