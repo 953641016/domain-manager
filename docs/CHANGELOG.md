@@ -10,6 +10,7 @@
 
 ### 新增
 - **Cloudflare Token 权限说明**（`docs/CLOUDFLARE_TOKEN_PERMISSIONS.md`、`frontend/src/pages/Help/CloudflareTokenPermissions.tsx`）：新增 Cloudflare DNS 解析、重定向规则和 Registrar Token 最小权限配置说明；后台新增 `/help/cloudflare-token-permissions` 可读页面，并在 DNS账号管理页提供入口。
+- **飞书卡片回调开发规范**（`docs/feishu-card-design-spec.md`）：新增 `200341` 超时避坑规则，明确卡片回调 3 秒内返回、禁止响应前调用外部 API 或更新卡片，后续慢操作必须后台化。
 - **飞书菜单自主注册域名**（`backend/app/api/v1/feishu.py`）：支持机器人底部菜单事件触发“自主注册域名”入口；域名专员/超级管理员点击后返回飞书表单卡片，可填写域名、注册账号、年限和可选联系人 JSON，提交后直接创建并批准注册申请，后台执行注册、发送结果卡片并写入操作日志；无权限用户会收到无权限提示卡片。
 - **DNS 记录同步合并逻辑**（`backend/app/tasks/scheduler.py`）：定时同步远程 DNS 记录时不再只计数，会将服务商返回的记录合并到本地表，支持新增、更新、远程缺失记录软删除，并在审计日志中记录新增/更新/删除数量。
 - **基础单元测试**（`pytest.ini`、`backend/tests/`）：新增后端测试入口，覆盖 Web 端业务流程写接口禁用、DNS 记录同步合并、Namecheap/Enom 占位注册商隐藏。
