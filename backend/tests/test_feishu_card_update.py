@@ -8,9 +8,12 @@ from app.services.execution_service import ExecutionService
 from app.services.user_confirmation_service import UserOperationConfirmationService
 from app.api.v1.feishu import (
     _build_domain_purchase_approval_card,
+    _build_direct_register_form_card,
     _build_request_submitted_card,
     _handle_card_action,
     _handle_doc_request_card_action,
+    _resolve_direct_reg_account_id,
+    _resolve_reg_account_id,
 )
 
 
@@ -192,3 +195,60 @@ def test_doc_card_action_starts_background_immediately(monkeypatch):
     assert result["toast"]["type"] == "success"
     assert captured["name"] == "feishu-doc-request-req-1"
     assert captured["coro_func"] == "_process_doc_request_card_action"
+
+
+def test_card_action_handles_legacy_root_action_and_json_value(monkeypatch):
+    captured = {}
+
+    def fake_start(name, coro_func, *args):
+        captured["name"] = name
+        captured["coro_func"] = coro_func.__name__
+        captured["args"] = args
+
+    monkeypatch.setattr("app.api.v1.feishu._start_async_card_background_task", fake_start)
+
+    result = asyncio.run(_handle_card_action({
+        "action": {
+            "value": "{\"action\":\"approve_doc_request\",\"request_id\":\"req-legacy\"}",
+            "form_value": {"selected_reg_account_id": {"value": "1"}},
+        },
+        "open_id": "ou_reviewer",
+    }))
+
+    assert result["toast"]["type"] == "success"
+    assert captured["name"] == "feishu-doc-request-req-legacy"
+    assert captured["args"][0] == "approve_doc_request"
+    assert captured["args"][1] == {"action": "approve_doc_request", "request_id": "req-legacy"}
+    assert captured["args"][2] == {"selected_reg_account_id": {"value": "1"}}
+    assert captured["args"][3]["open_id"] == "ou_reviewer"
+
+
+def test_domain_register_account_falls_back_to_request_default():
+    request = SimpleNamespace(
+        selected_reg_account_id=None,
+        request_data={"default_reg_account_id": 7},
+    )
+
+    assert _resolve_reg_account_id({}, request) == 7
+    assert _resolve_reg_account_id({"selected_reg_account_id": {"value": "8"}}, request) == 8
+
+
+def test_direct_register_card_carries_default_account_for_unchanged_select():
+    operator = SimpleNamespace(name="域名专员")
+    accounts = [
+        SimpleNamespace(id=3, name="Cy1408569", registrar_code="cloudflare"),
+        SimpleNamespace(id=4, name="GoDaddy", registrar_code="godaddy"),
+    ]
+
+    card = _build_direct_register_form_card(operator, accounts)
+    card_text = json.dumps(card, ensure_ascii=False)
+
+    assert '"default_reg_account_id": "3"' in card_text
+    assert '"default_register_years": "1"' in card_text
+
+
+def test_direct_register_account_falls_back_to_button_value():
+    value = {"default_reg_account_id": "3"}
+
+    assert _resolve_direct_reg_account_id({}, value) == 3
+    assert _resolve_direct_reg_account_id({"selected_reg_account_id": {"value": "4"}}, value) == 4

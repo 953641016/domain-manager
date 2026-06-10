@@ -39,7 +39,14 @@ def _start_async_card_background_task(name: str, coro_func, *args) -> None:
     import asyncio
 
     def runner() -> None:
-        asyncio.run(coro_func(*args))
+        result = asyncio.run(coro_func(*args))
+        toast = result.get("toast", {}) if isinstance(result, dict) else {}
+        if toast.get("type") == "error":
+            logging.getLogger(__name__).warning(
+                "飞书卡片后台任务返回错误: %s %s",
+                name,
+                toast.get("content"),
+            )
 
     _start_card_background_task(name, runner)
 
@@ -221,7 +228,7 @@ async def feishu_webhook(request: Request):
             return await _handle_bot_menu_event(request_body)
 
         # 处理卡片按钮回调（超管点击授权/拒绝账号操作）
-        if request_body.get("type") == "card" or event_type == "card.action.trigger":
+        if _is_card_action_callback(request_body, event_type):
             _log.info("feishu card action received")
             return await _handle_card_action(request_body)
 
@@ -820,6 +827,7 @@ def _build_permission_denied_card(user_name: str = "") -> Dict[str, Any]:
 def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str, Any]:
     account_options = _reg_account_options(accounts)
     default_option = account_options[0].get("text", {}).get("content") if account_options else ""
+    default_account_id = account_options[0].get("value") if account_options else ""
     return {
         "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
@@ -880,7 +888,11 @@ def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str,
                         "action_type": "form_submit",
                         "text": {"tag": "plain_text", "content": "✅ 提交并注册"},
                         "type": "primary",
-                        "value": {"action": "submit_direct_domain_register"},
+                        "value": {
+                            "action": "submit_direct_domain_register",
+                            "default_reg_account_id": default_account_id,
+                            "default_register_years": "1",
+                        },
                     },
                 ],
             },
@@ -1610,11 +1622,17 @@ async def _handle_card_action(body: dict) -> dict:
     超管点击"授权执行"或"拒绝"按钮时触发
     """
     try:
-        action = body.get("action", {})
-        value = action.get("value", {}) or body.get("event", {}).get("action", {}).get("value", {})
-        operator = body.get("operator", {}) or body.get("event", {}).get("operator", {})
+        action = _extract_card_action(body)
+        value = _normalize_card_action_value(action.get("value", {}))
+        operator = _extract_card_operator(body)
 
         card_action = value.get("action", "")
+        if not card_action:
+            logging.getLogger(__name__).warning(
+                "飞书卡片回调缺少 action: body_keys=%s action_keys=%s",
+                list(body.keys()),
+                list(action.keys()),
+            )
 
         # DNS 解析申请审批（专员操作）
         if card_action in ("approve_dns_request", "reject_dns_request"):
@@ -1657,7 +1675,7 @@ async def _handle_card_action(body: dict) -> dict:
 
 def _extract_card_form_values(body: dict) -> Dict[str, Any]:
     """兼容不同飞书卡片版本的表单回传结构。"""
-    action = body.get("action", {}) or body.get("event", {}).get("action", {})
+    action = _extract_card_action(body)
     candidates = [
         action.get("form_value"),
         action.get("form_values"),
@@ -1669,6 +1687,46 @@ def _extract_card_form_values(body: dict) -> Dict[str, Any]:
         if isinstance(item, dict):
             result.update(item)
     return result
+
+
+def _is_card_action_callback(body: dict, event_type: Optional[str]) -> bool:
+    """兼容新版/旧版飞书卡片回调入口。"""
+    callback_type = body.get("type")
+    return bool(
+        callback_type in ("card", "interactive", "card.action.trigger")
+        or event_type == "card.action.trigger"
+        or body.get("action")
+        or body.get("event", {}).get("action")
+    )
+
+
+def _extract_card_action(body: dict) -> Dict[str, Any]:
+    action = body.get("action") or body.get("event", {}).get("action") or {}
+    return action if isinstance(action, dict) else {}
+
+
+def _extract_card_operator(body: dict) -> Dict[str, Any]:
+    operator = body.get("operator") or body.get("event", {}).get("operator") or {}
+    if isinstance(operator, dict) and operator:
+        return operator
+    return {
+        "open_id": body.get("open_id") or body.get("event", {}).get("open_id") or "",
+        "user_id": body.get("user_id") or body.get("event", {}).get("user_id") or "",
+    }
+
+
+def _normalize_card_action_value(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        import json
+
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
 
 
 def _as_int(value: Any) -> Optional[int]:
@@ -1689,6 +1747,24 @@ def _resolve_dns_account_id(form_values: Dict[str, Any], req: Any) -> Optional[i
         _as_int(form_values.get("selected_dns_account_id"))
         or _as_int(request_data.get("default_dns_account_id"))
         or _as_int(getattr(req, "selected_dns_account_id", None))
+    )
+
+
+def _resolve_reg_account_id(form_values: Dict[str, Any], req: Any) -> Optional[int]:
+    """飞书 select_static 未改动时可能不回传 initial_option，使用申请默认注册账号兜底。"""
+    request_data = dict(getattr(req, "request_data", None) or {})
+    return (
+        _as_int(form_values.get("selected_reg_account_id"))
+        or _as_int(request_data.get("default_reg_account_id"))
+        or _as_int(getattr(req, "selected_reg_account_id", None))
+    )
+
+
+def _resolve_direct_reg_account_id(form_values: Dict[str, Any], value: Dict[str, Any]) -> Optional[int]:
+    """自主注册表单未改动下拉框时，使用卡片按钮携带的默认注册账号。"""
+    return (
+        _as_int(form_values.get("selected_reg_account_id"))
+        or _as_int((value or {}).get("default_reg_account_id"))
     )
 
 
@@ -1837,7 +1913,7 @@ async def _handle_direct_domain_register_action(value: dict, form_values: Dict[s
     domain = _normalize_domain_name(form_values.get("domain_name"))
     if not domain:
         return {"toast": {"type": "error", "content": "请输入有效域名，例如 example.com"}}
-    if not _as_int(form_values.get("selected_reg_account_id")):
+    if not _resolve_direct_reg_account_id(form_values, value):
         return {"toast": {"type": "error", "content": "请选择注册服务商账号"}}
     try:
         _parse_registrant_json(_as_text(form_values.get("registrant_json")))
@@ -1882,7 +1958,7 @@ async def _process_direct_domain_register_action(value: dict, form_values: Dict[
         if not domain:
             return {"toast": {"type": "error", "content": "请输入有效域名，例如 example.com"}}
 
-        account_id = _as_int(form_values.get("selected_reg_account_id"))
+        account_id = _resolve_direct_reg_account_id(form_values, value)
         if not account_id:
             return {"toast": {"type": "error", "content": "请选择注册服务商账号"}}
 
@@ -1899,7 +1975,7 @@ async def _process_direct_domain_register_action(value: dict, form_values: Dict[
             return {"toast": {"type": "error", "content": f"{domain} 已存在待处理或已完成的注册申请，已阻止重复注册"}}
 
         try:
-            register_years = int(_as_text(form_values.get("register_years")) or "1")
+            register_years = int(_as_text(form_values.get("register_years")) or _as_text(value.get("default_register_years")) or "1")
         except ValueError:
             register_years = 1
         register_years = max(1, min(register_years, 10))
@@ -2057,18 +2133,28 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
 
         if req.type == "domain_register":
-            account_id = _as_int(form_values.get("selected_reg_account_id"))
+            account_id = _resolve_reg_account_id(form_values, req)
             if not account_id:
-                return {"toast": {"type": "error", "content": "请选择注册厂商账号"}}
+                return _notify_doc_request_action_failed(req, applicant, reviewer, "请选择注册厂商账号")
             account = db.query(RegAccount).filter(RegAccount.id == account_id, RegAccount.is_active == True).first()  # noqa: E712
             if not account or (reviewer.role != "super_admin" and account.owner_id != reviewer.id):
-                return {"toast": {"type": "error", "content": "无权使用该注册账号"}}
+                return _notify_doc_request_action_failed(req, applicant, reviewer, "无权使用该注册账号")
             selected_quotes = _quote_reg_account_prices(db, req.domain_name, [account])
             selected_quote = selected_quotes.get(str(account.id)) or {}
             if not selected_quote.get("check_successful"):
-                return {"toast": {"type": "error", "content": f"所选服务商查价失败：{selected_quote.get('message') or '检查失败'}"}}
+                return _notify_doc_request_action_failed(
+                    req,
+                    applicant,
+                    reviewer,
+                    f"所选服务商查价失败：{selected_quote.get('message') or '检查失败'}",
+                )
             if selected_quote.get("check_successful") and selected_quote.get("available") is False:
-                return {"toast": {"type": "error", "content": f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}"}}
+                return _notify_doc_request_action_failed(
+                    req,
+                    applicant,
+                    reviewer,
+                    f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}",
+                )
             req.selected_reg_account_id = account.id
             req.selected_registrar_code = account.registrar_code
             request_data = dict(req.request_data or {})
@@ -2078,10 +2164,10 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
         else:
             account_id = _resolve_dns_account_id(form_values, req)
             if not account_id:
-                return {"toast": {"type": "error", "content": "请选择 DNS 账号"}}
+                return _notify_doc_request_action_failed(req, applicant, reviewer, "请选择 DNS 账号")
             account = db.query(DnsAccount).filter(DnsAccount.id == account_id, DnsAccount.is_active == True).first()  # noqa: E712
             if not account or (reviewer.role != "super_admin" and account.owner_id != reviewer.id):
-                return {"toast": {"type": "error", "content": "无权使用该 DNS 账号"}}
+                return _notify_doc_request_action_failed(req, applicant, reviewer, "无权使用该 DNS 账号")
             req.selected_dns_account_id = account.id
             req.selected_dns_provider_code = account.provider_code
             comment = _as_text(form_values.get("approval_comment"))
@@ -2147,6 +2233,53 @@ def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
             }, receive_type)
         except Exception:
             pass
+
+
+def _notify_doc_request_action_failed(req, applicant, reviewer, reason: str) -> dict:
+    """后台审批校验失败时主动通知，避免回调已返回但用户看不到失败原因。"""
+    label = "域名购买" if req.type == "domain_register" else "DNS 解析"
+    content = (
+        f"**状态**：审批未执行\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**审批人**：{getattr(reviewer, 'name', '未知')}\n"
+        f"**失败原因**：{reason}\n\n"
+        f"原申请仍保持待审批，可修正后重新点击审批按钮。"
+    )
+    targets = []
+    if reviewer:
+        targets.append(reviewer)
+    if applicant and (not reviewer or getattr(applicant, "id", None) != getattr(reviewer, "id", None)):
+        targets.append(applicant)
+    for user in targets:
+        receive_id = getattr(user, "feishu_open_id", None) or getattr(user, "feishu_user_id", None)
+        if not receive_id:
+            continue
+        receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
+        try:
+            feishu_service.send_card_message(receive_id, {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": f"⚠️ {label}审批未执行"},
+                    "template": "orange",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                ],
+            }, receive_type)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "发送业务审批未执行通知失败: request_id=%s user_id=%s",
+                getattr(req, "id", None),
+                getattr(user, "id", None),
+                exc_info=True,
+            )
+    logging.getLogger(__name__).warning(
+        "业务审批后台校验失败: request_id=%s reason=%s",
+        getattr(req, "id", None),
+        reason,
+    )
+    return {"toast": {"type": "error", "content": reason}}
 
 
 def _update_request_approval_card_rejected(req, applicant, reviewer, reason: str) -> None:
