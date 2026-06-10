@@ -489,7 +489,67 @@ def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[A
         req.feishu_message_id = msg_id
         db.commit()
         db.refresh(req)
+    _send_request_submitted_card(req, applicant, specialist)
     return result
+
+
+def _send_request_submitted_card(req, applicant, reviewer=None) -> None:
+    """给申请人发送只读申请卡片：无按钮、不保存 message_id、不影响主流程。"""
+    receive_id = getattr(applicant, "feishu_open_id", None) or getattr(applicant, "feishu_user_id", None)
+    if not receive_id:
+        return
+    receive_type = "open_id" if getattr(applicant, "feishu_open_id", None) else "user_id"
+    card = _build_request_submitted_card(req, applicant, reviewer)
+    try:
+        feishu_service.send_card_message(receive_id, card, receive_type)
+    except Exception:
+        logger.warning("发送申请人只读申请卡片失败: request_id=%s", getattr(req, "id", ""), exc_info=True)
+
+
+def _build_request_submitted_card(req, applicant, reviewer=None) -> Dict[str, Any]:
+    data = req.request_data or {}
+    is_domain_register = req.type == "domain_register"
+    title = "🛒 域名购买申请已提交" if is_domain_register else "🌐 DNS 解析申请已提交"
+    template = "orange" if is_domain_register else "blue"
+    lines = [
+        "**状态**：待审批",
+        f"**域名**：{req.domain_name}",
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}",
+        f"**申请时间**：{_format_card_time(req.created_at)}",
+    ]
+    if not is_domain_register:
+        lines.insert(1, f"**申请类型**：{data.get('action_label', req.type)}")
+        records = data.get("records") or []
+        lines.append(f"**记录数**：{len(records)}")
+    doc_url = data.get("doc_url")
+    doc_title = data.get("doc_title") or "飞书文档"
+    if doc_url:
+        lines.append(f"**来源文档**：[{doc_title}]({doc_url})")
+    if reviewer:
+        lines.append(f"**审核人**：{getattr(reviewer, 'name', '未知')}")
+    lines.append("已发送给审核人处理；此卡片仅供查看，不能操作。")
+
+    elements: List[Dict[str, Any]] = [
+        {"tag": "div", "text": {"tag": "lark_md", "content": "\n".join(lines)}},
+    ]
+    if not is_domain_register:
+        records = data.get("records") or []
+        preview = "\n".join(
+            f"• `{r.get('hostname')}` {r.get('type')} → {r.get('target') or '待配置'}"
+            for r in records[:8]
+        )
+        if len(records) > 8:
+            preview += f"\n... 另有 {len(records) - 8} 条"
+        if preview:
+            elements.extend([
+                {"tag": "hr"},
+                {"tag": "div", "text": {"tag": "lark_md", "content": preview}},
+            ])
+    return {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {"title": {"tag": "plain_text", "content": title}, "template": template},
+        "elements": elements,
+    }
 
 
 def _get_reviewable_reg_accounts(db: Session, reviewer) -> List[Any]:
@@ -1446,6 +1506,7 @@ def submit_request(
                     ),
                     receive_id_type=receive_type,
                 )
+        _send_request_submitted_card(req, current_user, specialist)
 
     return {"success": True, "request_id": req.id}
 
@@ -1538,6 +1599,7 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
                 req.feishu_message_id = msg_id
                 db.commit()
                 db.refresh(req)
+        _send_request_submitted_card(req, user, specialist)
 
     return {"success": True, "request_id": req.id, "records_count": len(records)}
 

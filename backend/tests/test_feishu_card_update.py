@@ -8,6 +8,7 @@ from app.services.execution_service import ExecutionService
 from app.services.user_confirmation_service import UserOperationConfirmationService
 from app.api.v1.feishu import (
     _build_domain_purchase_approval_card,
+    _build_request_submitted_card,
     _handle_card_action,
     _handle_doc_request_card_action,
 )
@@ -94,6 +95,35 @@ def test_domain_purchase_approval_card_is_updateable():
     assert card["config"]["update_multi"] is True
     assert "approve_doc_request" in card_text
     assert "reject_doc_request" in card_text
+
+
+def test_request_submitted_card_is_readonly_for_applicant():
+    request = SimpleNamespace(
+        id="abcdef123456",
+        type="dns_record",
+        domain_name="example.com",
+        requester_name="申请人",
+        created_at=datetime(2026, 6, 9, 16, 0, 0),
+        request_data={
+            "action_label": "Clerk 域名解析",
+            "doc_title": "需求文档",
+            "doc_url": "https://example.com/doc",
+            "records": [
+                {"hostname": "clerk", "type": "CNAME", "target": "frontend-api.clerk.services"},
+            ],
+        },
+    )
+    applicant = SimpleNamespace(name="申请人")
+    reviewer = SimpleNamespace(name="域名专员")
+
+    card = _build_request_submitted_card(request, applicant, reviewer)
+    card_text = json.dumps(card, ensure_ascii=False)
+
+    assert card["header"]["title"]["content"] == "🌐 DNS 解析申请已提交"
+    assert "**状态**：待审批" in card_text
+    assert "仅供查看，不能操作" in card_text
+    assert "form_submit" not in card_text
+    assert "button" not in card_text
 
 
 def test_request_card_status_handles_pending_partial_and_failed():
