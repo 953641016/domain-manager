@@ -34,6 +34,7 @@
 ### 修复
 - **飞书超管审批原卡片状态回写**（`backend/app/services/feishu_service.py`、`backend/app/services/user_confirmation_service.py`）：用户管理/账号配置授权卡片在审批通过或拒绝后，会用原 `message_id` 更新为“已授权/已拒绝/已授权但执行失败”状态并移除操作按钮，同时保留后续结果通知卡片，避免旧卡片看起来仍可审批。
 - **飞书业务审批原卡片状态回写**（`backend/app/api/v1/feishu.py`、`backend/app/services/execution_service.py`）：域名购买、DNS 解析和旧版多维表格 DNS 审批卡片发送后保存 `message_id`；审批通过会先回写为“已批准，正在执行”，拒绝会回写为“已拒绝”，执行完成/失败/异步注册待确认会继续更新同一张原卡片并移除操作按钮。
+- **飞书卡片 200341 超时治理**（`backend/app/api/v1/feishu.py`）：按飞书官方 3 秒回调要求，将超管授权、文档按钮审批、旧版 DNS 审批和自主注册表单统一改为“回调内只做参数解析并立即返回 toast，数据库校验、服务商调用、卡片更新和通知全部后台处理”，避免响应前调用更新卡片或执行慢操作导致客户端报 `200341`。
 - **Cloudflare DNS 自检操作提示**（`backend/app/api/v1/domains.py`、`frontend/src/pages/Config.tsx`）：DNS账号自检失败时返回并展示 Cloudflare 后台权限配置步骤，方便直接按提示补齐 `DNS/Edit`、`Zone/Read` 和重定向规则权限。
 - **Cloudflare DNS 账号自检准确性**（`backend/app/api/v1/domains.py`）：Cloudflare Account API Token 不再用 `/user/tokens/verify` 误判；自检新增 DNS 记录读取权限检查，能提前暴露只有 Zone 列表权限、无法读取/写入 DNS 记录的问题。
 - **飞书文档 Vercel JSON 代码块解析**（`backend/app/services/feishu_doc_parser.py`）：支持 `vercelDomainsRecords` 代码块中的 `host/name/type/value` 结构，避免一键解析申请漏掉 Vercel 根域名与 `www` 记录。

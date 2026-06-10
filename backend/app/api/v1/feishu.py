@@ -2,6 +2,8 @@
 飞书相关API路由
 提供OAuth授权、用户信息获取、webhook事件处理等接口
 """
+import logging
+
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -17,6 +19,29 @@ router = APIRouter(
     prefix="/feishu",
     tags=["飞书集成"],
 )
+
+
+def _start_card_background_task(name: str, target, *args) -> None:
+    """卡片回调必须 3 秒内响应；所有慢操作统一放后台线程。"""
+    import threading
+
+    def runner() -> None:
+        try:
+            target(*args)
+        except Exception:
+            logging.getLogger(__name__).exception("飞书卡片后台任务失败: %s", name)
+
+    threading.Thread(target=runner, name=name, daemon=True).start()
+
+
+def _start_async_card_background_task(name: str, coro_func, *args) -> None:
+    """后台线程中运行既有 async 卡片处理函数。"""
+    import asyncio
+
+    def runner() -> None:
+        asyncio.run(coro_func(*args))
+
+    _start_card_background_task(name, runner)
 
 # ── 已知 section 列表 ──────────────────────────────────────
 SECTIONS_WITH_BITABLE = {
@@ -1547,47 +1572,21 @@ async def _handle_card_action(body: dict) -> dict:
         if not confirmation_id or card_action not in ("approve_account_op", "reject_account_op"):
             return {"success": True, "message": "非账号授权卡片，忽略"}
 
-        confirmation_id = int(confirmation_id)
+        try:
+            confirmation_id = int(confirmation_id)
+        except (TypeError, ValueError):
+            return {"toast": {"type": "error", "content": "卡片数据异常，缺少有效 confirmation_id"}}
         operator_open_id = operator.get("open_id", "") or operator.get("user_id", "")
         form_values = _extract_card_form_values(body)
-
-        from app.core.database import SessionLocal
-        from app.services.user_confirmation_service import UserOperationConfirmationService
-
-        db = SessionLocal()
-        try:
-            conf_svc = UserOperationConfirmationService(db)
-            approver = conf_svc.get_user_by_feishu_id(operator_open_id)
-            if not approver or approver.role != "super_admin":
-                return {"toast": {"type": "error", "content": "只有超级管理员可以审批此操作"}}
-
-            if card_action == "approve_account_op":
-                confirmation = conf_svc.get_confirmation(confirmation_id)
-                if not confirmation or not confirmation.is_pending:
-                    return {"toast": {"type": "error", "content": "授权失败（已处理或不存在）"}}
-                _process_confirmation_in_background(
-                    confirmation_id,
-                    card_action,
-                    approver.id,
-                    approver.name,
-                    operator_open_id,
-                )
-                return {"toast": {"type": "success", "content": "已受理，正在授权执行"}}
-            else:
-                confirmation = conf_svc.get_confirmation(confirmation_id)
-                if not confirmation or not confirmation.is_pending:
-                    return {"toast": {"type": "error", "content": "拒绝失败（已处理或不存在）"}}
-                _process_confirmation_in_background(
-                    confirmation_id,
-                    card_action,
-                    approver.id,
-                    approver.name,
-                    operator_open_id,
-                    _as_text(form_values.get("reject_reason")) or "未填写",
-                )
-                return {"toast": {"type": "info", "content": "已受理拒绝操作"}}
-        finally:
-            db.close()
+        _process_confirmation_in_background(
+            confirmation_id,
+            card_action,
+            operator_open_id,
+            _as_text(form_values.get("reject_reason")) or "未填写",
+        )
+        if card_action == "approve_account_op":
+            return {"toast": {"type": "success", "content": "已受理，正在授权执行"}}
+        return {"toast": {"type": "info", "content": "已受理拒绝操作"}}
     except Exception as e:
         import logging
         logging.getLogger(__name__).exception("处理卡片回调失败")
@@ -1773,6 +1772,27 @@ def _parse_registrant_json(value: str) -> Dict[str, Any]:
 
 
 async def _handle_direct_domain_register_action(value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
+    domain = _normalize_domain_name(form_values.get("domain_name"))
+    if not domain:
+        return {"toast": {"type": "error", "content": "请输入有效域名，例如 example.com"}}
+    if not _as_int(form_values.get("selected_reg_account_id")):
+        return {"toast": {"type": "error", "content": "请选择注册服务商账号"}}
+    try:
+        _parse_registrant_json(_as_text(form_values.get("registrant_json")))
+    except Exception as e:
+        return {"toast": {"type": "error", "content": f"注册联系人 JSON 格式错误: {str(e)}"}}
+
+    _start_async_card_background_task(
+        f"feishu-direct-register-{domain}",
+        _process_direct_domain_register_action,
+        value,
+        form_values,
+        operator,
+    )
+    return {"toast": {"type": "success", "content": f"已受理 {domain} 自主注册，正在处理"}}
+
+
+async def _process_direct_domain_register_action(value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
     """处理域名专员/超管通过机器人菜单发起的自主注册表单提交。"""
     import logging
     logger = logging.getLogger(__name__)
@@ -1876,33 +1896,36 @@ async def _handle_direct_domain_register_action(value: dict, form_values: Dict[s
 def _process_confirmation_in_background(
     confirmation_id: int,
     card_action: str,
-    approver_user_id: int,
-    approver_name: str,
     approver_feishu_userid: str,
     reject_reason: str = "",
 ) -> None:
     """超管确认涉及写库和通知，放到后台避免飞书卡片 200341 超时。"""
-    import logging
-    import threading
-
     def runner() -> None:
         db = SessionLocal()
         try:
             from app.services.user_confirmation_service import UserOperationConfirmationService
 
             conf_svc = UserOperationConfirmationService(db)
+            approver = conf_svc.get_user_by_feishu_id(approver_feishu_userid)
+            if not approver or approver.role != "super_admin":
+                logging.getLogger(__name__).warning(
+                    "超管确认后台处理拒绝：操作者无权限 confirmation_id=%s operator=%s",
+                    confirmation_id,
+                    approver_feishu_userid,
+                )
+                return
             if card_action == "approve_account_op":
                 conf_svc.approve_confirmation(
                     confirmation_id=confirmation_id,
-                    approver_user_id=approver_user_id,
-                    approver_name=approver_name,
+                    approver_user_id=approver.id,
+                    approver_name=approver.name,
                     approver_feishu_userid=approver_feishu_userid,
                 )
             else:
                 conf_svc.reject_confirmation(
                     confirmation_id=confirmation_id,
-                    approver_user_id=approver_user_id,
-                    approver_name=approver_name,
+                    approver_user_id=approver.id,
+                    approver_name=approver.name,
                     approver_feishu_userid=approver_feishu_userid,
                     reject_reason=reject_reason or "未填写",
                 )
@@ -1911,10 +1934,28 @@ def _process_confirmation_in_background(
         finally:
             db.close()
 
-    threading.Thread(target=runner, name=f"feishu-confirm-{confirmation_id}", daemon=True).start()
+    _start_card_background_task(f"feishu-confirm-{confirmation_id}", runner)
 
 
 async def _handle_doc_request_card_action(card_action: str, value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
+    request_id = value.get("request_id")
+    if not request_id:
+        return {"toast": {"type": "error", "content": "卡片数据异常，缺少 request_id"}}
+
+    _start_async_card_background_task(
+        f"feishu-doc-request-{request_id}",
+        _process_doc_request_card_action,
+        card_action,
+        value,
+        form_values,
+        operator,
+    )
+    if card_action == "reject_doc_request":
+        return {"toast": {"type": "info", "content": "已受理拒绝操作"}}
+    return {"toast": {"type": "success", "content": "已受理，正在审批执行"}}
+
+
+async def _process_doc_request_card_action(card_action: str, value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
     """处理新版文档按钮申请审批卡片。"""
     import logging
     logger = logging.getLogger(__name__)
@@ -2120,6 +2161,24 @@ def _update_request_approval_card_processing(req, applicant, reviewer) -> None:
 
 
 async def _handle_dns_card_action(card_action: str, value: dict, operator: dict, form_values: Optional[Dict[str, Any]] = None) -> dict:
+    request_id = value.get("request_id")
+    if not request_id:
+        return {"toast": {"type": "error", "content": "卡片数据异常，缺少 request_id"}}
+
+    _start_async_card_background_task(
+        f"feishu-dns-request-{request_id}",
+        _process_dns_card_action,
+        card_action,
+        value,
+        operator,
+        form_values or {},
+    )
+    if card_action == "reject_dns_request":
+        return {"toast": {"type": "info", "content": "已受理拒绝操作"}}
+    return {"toast": {"type": "success", "content": "已受理，正在执行 DNS 配置"}}
+
+
+async def _process_dns_card_action(card_action: str, value: dict, operator: dict, form_values: Optional[Dict[str, Any]] = None) -> dict:
     """专员点击 DNS 审批卡片后的处理（批准/拒绝）。"""
     import logging
     logger = logging.getLogger(__name__)

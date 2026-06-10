@@ -1,11 +1,16 @@
 import json
+import asyncio
 from datetime import datetime
 from types import SimpleNamespace
 
 from app.services.feishu_service import FeishuService
 from app.services.execution_service import ExecutionService
 from app.services.user_confirmation_service import UserOperationConfirmationService
-from app.api.v1.feishu import _build_domain_purchase_approval_card
+from app.api.v1.feishu import (
+    _build_domain_purchase_approval_card,
+    _handle_card_action,
+    _handle_doc_request_card_action,
+)
 
 
 def test_update_card_message_serializes_interactive_card(monkeypatch):
@@ -106,3 +111,54 @@ def test_request_card_status_handles_pending_partial_and_failed():
         True,
     ) == "部分成功"
     assert ExecutionService._request_card_status(request, {}, False) == "执行失败"
+
+
+def test_account_card_action_returns_before_database_validation(monkeypatch):
+    captured = {}
+
+    def fake_background(confirmation_id, card_action, approver_feishu_userid, reject_reason=""):
+        captured.update({
+            "confirmation_id": confirmation_id,
+            "card_action": card_action,
+            "approver_feishu_userid": approver_feishu_userid,
+            "reject_reason": reject_reason,
+        })
+
+    monkeypatch.setattr("app.api.v1.feishu._process_confirmation_in_background", fake_background)
+
+    result = asyncio.run(_handle_card_action({
+        "action": {
+            "value": {"action": "approve_account_op", "confirmation_id": "123"},
+        },
+        "operator": {"open_id": "ou_approver"},
+    }))
+
+    assert result["toast"]["type"] == "success"
+    assert captured == {
+        "confirmation_id": 123,
+        "card_action": "approve_account_op",
+        "approver_feishu_userid": "ou_approver",
+        "reject_reason": "未填写",
+    }
+
+
+def test_doc_card_action_starts_background_immediately(monkeypatch):
+    captured = {}
+
+    def fake_start(name, coro_func, *args):
+        captured["name"] = name
+        captured["coro_func"] = coro_func.__name__
+        captured["args"] = args
+
+    monkeypatch.setattr("app.api.v1.feishu._start_async_card_background_task", fake_start)
+
+    result = asyncio.run(_handle_doc_request_card_action(
+        "approve_doc_request",
+        {"request_id": "req-1"},
+        {"selected_dns_account_id": {"value": "1"}},
+        {"open_id": "ou_reviewer"},
+    ))
+
+    assert result["toast"]["type"] == "success"
+    assert captured["name"] == "feishu-doc-request-req-1"
+    assert captured["coro_func"] == "_process_doc_request_card_action"
