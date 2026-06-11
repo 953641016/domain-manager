@@ -12,6 +12,7 @@ from app.api.v1.feishu import (
     _build_request_submitted_card,
     _handle_card_action,
     _handle_doc_request_card_action,
+    _is_direct_register_form_expired,
     _resolve_direct_reg_account_id,
     _resolve_reg_account_id,
 )
@@ -245,6 +246,7 @@ def test_direct_register_card_carries_default_account_for_unchanged_select():
 
     assert '"default_reg_account_id": "3"' in card_text
     assert '"default_register_years": "1"' in card_text
+    assert '"input_expires_at":' in card_text
 
 
 def test_direct_register_account_falls_back_to_button_value():
@@ -252,3 +254,9 @@ def test_direct_register_account_falls_back_to_button_value():
 
     assert _resolve_direct_reg_account_id({}, value) == 3
     assert _resolve_direct_reg_account_id({"selected_reg_account_id": {"value": "4"}}, value) == 4
+
+
+def test_direct_register_form_expiry_uses_button_value():
+    assert _is_direct_register_form_expired({}) is True
+    assert _is_direct_register_form_expired({"input_expires_at": "2000-01-01T00:00:00Z"}) is True
+    assert _is_direct_register_form_expired({"input_expires_at": "2999-01-01T00:00:00Z"}) is False

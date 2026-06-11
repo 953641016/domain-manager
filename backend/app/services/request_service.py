@@ -3,11 +3,15 @@
 """
 import uuid
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from app.models.request import Request
 from app.schemas.request import RequestCreate, RequestUpdate
+
+
+REQUEST_APPROVAL_EXPIRE_HOURS = 24
+REQUEST_APPROVAL_TIMEOUT_REASON = f"申请已超时（{REQUEST_APPROVAL_EXPIRE_HOURS}小时），自动作废"
 
 
 class RequestService:
@@ -71,6 +75,32 @@ class RequestService:
         """获取申请详情"""
         return self.db.query(Request).filter(Request.id == request_id).first()
 
+    def is_approval_expired(self, request: Optional[Request]) -> bool:
+        """业务申请审批有效期为 24 小时。"""
+        if not request or request.status != "pending" or not request.created_at:
+            return False
+        created_at = request.created_at.replace(tzinfo=None)
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        return now_utc > created_at + timedelta(hours=REQUEST_APPROVAL_EXPIRE_HOURS)
+
+    def expire_request_if_needed(
+        self,
+        request: Optional[Request],
+        approver_id: Optional[int] = None,
+        approver_name: Optional[str] = None,
+    ) -> bool:
+        """若待审批业务申请已超时，则自动作废并返回 True。"""
+        if not self.is_approval_expired(request):
+            return False
+        request.status = "rejected"
+        request.approver_id = approver_id
+        request.approver_name = approver_name
+        request.approved_at = datetime.now()
+        request.reject_reason = REQUEST_APPROVAL_TIMEOUT_REASON
+        self.db.commit()
+        self.db.refresh(request)
+        return True
+
     def create_request(self, data: RequestCreate, requester_id: int, requester_name: str) -> Request:
         """创建申请"""
         # 生成UUID
@@ -118,6 +148,8 @@ class RequestService:
 
         if request.status != "pending":
             raise ValueError(f"申请状态不允许审批，当前状态: {request.status}")
+        if self.expire_request_if_needed(request, approver_id, approver_name):
+            raise ValueError(REQUEST_APPROVAL_TIMEOUT_REASON)
 
         request.status = "approved"
         request.approver_id = approver_id
@@ -139,6 +171,8 @@ class RequestService:
 
         if request.status != "pending":
             raise ValueError(f"申请状态不允许拒绝，当前状态: {request.status}")
+        if self.expire_request_if_needed(request, approver_id, approver_name):
+            raise ValueError(REQUEST_APPROVAL_TIMEOUT_REASON)
 
         request.status = "rejected"
         request.approver_id = approver_id

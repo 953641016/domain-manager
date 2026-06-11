@@ -825,9 +825,14 @@ def _build_permission_denied_card(user_name: str = "") -> Dict[str, Any]:
 
 
 def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str, Any]:
+    from datetime import datetime, timedelta, timezone
+
     account_options = _reg_account_options(accounts)
     default_option = account_options[0].get("text", {}).get("content") if account_options else ""
     default_account_id = account_options[0].get("value") if account_options else ""
+    input_expires_at = (
+        datetime.now(timezone.utc) + timedelta(hours=1)
+    ).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     return {
         "config": {"wide_screen_mode": True, "update_multi": True},
         "header": {
@@ -892,11 +897,12 @@ def _build_direct_register_form_card(operator, accounts: List[Any]) -> Dict[str,
                             "action": "submit_direct_domain_register",
                             "default_reg_account_id": default_account_id,
                             "default_register_years": "1",
+                            "input_expires_at": input_expires_at,
                         },
                     },
                 ],
             },
-            {"tag": "note", "elements": [{"tag": "plain_text", "content": "自主注册仅限域名专员/超级管理员；请确认域名拼写无误。"}]},
+            {"tag": "note", "elements": [{"tag": "plain_text", "content": "自主注册仅限域名专员/超级管理员；输入框有效期 1 小时，请确认域名拼写无误。"}]},
         ],
     }
 
@@ -1768,6 +1774,21 @@ def _resolve_direct_reg_account_id(form_values: Dict[str, Any], value: Dict[str,
     )
 
 
+def _is_direct_register_form_expired(value: Dict[str, Any]) -> bool:
+    from datetime import datetime, timezone
+
+    raw = _as_text((value or {}).get("input_expires_at"))
+    if not raw:
+        return True
+    try:
+        expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) > expires_at
+
+
 def _as_text(value: Any) -> str:
     if isinstance(value, dict):
         value = value.get("value") or value.get("text") or ""
@@ -1910,6 +1931,8 @@ def _parse_registrant_json(value: str) -> Dict[str, Any]:
 
 
 async def _handle_direct_domain_register_action(value: dict, form_values: Dict[str, Any], operator: dict) -> dict:
+    if _is_direct_register_form_expired(value):
+        return {"toast": {"type": "error", "content": "域名注册表单输入已超过1小时，请重新点击底部按钮获取新表单"}}
     domain = _normalize_domain_name(form_values.get("domain_name"))
     if not domain:
         return {"toast": {"type": "error", "content": "请输入有效域名，例如 example.com"}}
@@ -1953,6 +1976,8 @@ async def _process_direct_domain_register_action(value: dict, form_values: Dict[
         specialist = user_svc.get_user_by_any_feishu_id(operator_feishu_id)
         if not specialist or not specialist.is_active or specialist.role not in ("domain_spec", "super_admin"):
             return {"toast": {"type": "error", "content": "只有域名专员或超级管理员可以自主注册域名"}}
+        if _is_direct_register_form_expired(value):
+            return {"toast": {"type": "error", "content": "域名注册表单输入已超过1小时，请重新点击底部按钮获取新表单"}}
 
         domain = _normalize_domain_name(form_values.get("domain_name"))
         if not domain:
@@ -2125,6 +2150,10 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
             if not applicant or applicant.assigned_specialist_id != reviewer.id:
                 return {"toast": {"type": "error", "content": "该申请不属于您负责的业务同事"}}
 
+        expired_result = _expire_request_approval_if_needed(req_svc, req, applicant, reviewer)
+        if expired_result:
+            return expired_result
+
         if card_action == "reject_doc_request":
             reason = _as_text(form_values.get("reject_reason")) or "未填写"
             req = req_svc.reject_request(request_id, reviewer.id, reviewer.name, reason=reason) or req
@@ -2282,6 +2311,105 @@ def _notify_doc_request_action_failed(req, applicant, reviewer, reason: str) -> 
     return {"toast": {"type": "error", "content": reason}}
 
 
+def _expire_request_approval_if_needed(req_svc, req, applicant, reviewer) -> Optional[dict]:
+    from app.services.request_service import REQUEST_APPROVAL_TIMEOUT_REASON
+
+    if not req_svc.expire_request_if_needed(
+        req,
+        getattr(reviewer, "id", None),
+        getattr(reviewer, "name", None),
+    ):
+        return None
+    reason = REQUEST_APPROVAL_TIMEOUT_REASON
+    _update_request_approval_card_expired(req, applicant, reviewer, reason)
+    _notify_request_expired(req, applicant, reviewer, reason)
+    return {"toast": {"type": "error", "content": reason}}
+
+
+def _notify_request_expired(req, applicant, reviewer, reason: str) -> None:
+    label = "域名购买" if req.type == "domain_register" else "DNS 解析"
+    processed_time = _format_card_time(getattr(req, "approved_at", None))
+    targets = []
+    if applicant:
+        targets.append((
+            applicant,
+            f"⏱ {label}申请已过期",
+            (
+                f"**域名**：{req.domain_name}\n"
+                f"**处理时间**：{processed_time}\n"
+                f"**原因**：{reason}"
+            ),
+        ))
+    if reviewer and (not applicant or getattr(reviewer, "id", None) != getattr(applicant, "id", None)):
+        targets.append((
+            reviewer,
+            f"⏱ {label}申请已过期",
+            (
+                f"**域名**：{req.domain_name}\n"
+                f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+                f"**处理时间**：{processed_time}\n"
+                f"**原因**：{reason}"
+            ),
+        ))
+    for user, title, content in targets:
+        receive_id = getattr(user, "feishu_open_id", None) or getattr(user, "feishu_user_id", None)
+        if not receive_id:
+            continue
+        receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
+        try:
+            feishu_service.send_card_message(receive_id, {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": title},
+                    "template": "orange",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                ],
+            }, receive_type)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "发送业务审批过期通知失败: request_id=%s user_id=%s",
+                getattr(req, "id", None),
+                getattr(user, "id", None),
+                exc_info=True,
+            )
+
+
+def _update_request_approval_card_expired(req, applicant, reviewer, reason: str) -> None:
+    message_id = getattr(req, "feishu_message_id", None)
+    if not message_id:
+        return
+    label = "域名购买申请" if req.type == "domain_register" else "DNS 解析申请"
+    body = (
+        f"**状态**：已过期，自动作废\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**处理时间**：{_format_card_time(getattr(req, 'approved_at', None))}\n"
+        f"**原因**：{reason}"
+    )
+    card = {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"⏱ 已过期：{label}"},
+            "template": "orange",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，过期申请不会执行"}],
+            },
+        ],
+    }
+    try:
+        result = feishu_service.update_card_message(message_id, card)
+        if result.get("code") != 0:
+            logging.getLogger(__name__).warning("更新业务审批过期卡片失败: request_id=%s result=%s", req.id, result)
+    except Exception:
+        logging.getLogger(__name__).warning("更新业务审批过期卡片异常: request_id=%s", req.id, exc_info=True)
+
+
 def _update_request_approval_card_rejected(req, applicant, reviewer, reason: str) -> None:
     message_id = getattr(req, "feishu_message_id", None)
     if not message_id:
@@ -2402,14 +2530,17 @@ async def _process_dns_card_action(card_action: str, value: dict, operator: dict
             return {"toast": {"type": "error", "content": "申请不存在或已处理"}}
 
         # 校验归属：申请人的归属专员必须是当前操作人（超管除外）
+        requester = user_svc.get_user(request.requester_id)
         if specialist.role != "super_admin":
-            requester = user_svc.get_user(request.requester_id)
             if not requester or requester.assigned_specialist_id != specialist.id:
                 return {"toast": {"type": "error", "content": "该申请不属于您负责的业务同事"}}
 
+        expired_result = _expire_request_approval_if_needed(req_svc, request, requester, specialist)
+        if expired_result:
+            return expired_result
+
         if card_action == "approve_dns_request":
             request = req_svc.approve_request(request_id, specialist.id, specialist.name) or request
-            requester = user_svc.get_user(request.requester_id)
             _update_request_approval_card_processing(request, requester, specialist)
             _execute_request_in_background(request_id, "dns-request")
             return {"toast": {"type": "success", "content": "已批准，正在执行 DNS 配置"}}
