@@ -263,7 +263,7 @@ Content-Type: application/json
 飞书多维表格如果只能配置 URL 参数，也可以把同名字段放在 Query 中：
 
 ```http
-POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&doc_url=...&doc_format=standard_v1&applicant_feishu_id=张立坤&source=feishu_bitable_button
+POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&doc_url=...&doc_format=standard_v1&applicant_feishu_id=张立坤&source=feishu_bitable_button&register_domain=example.com
 ```
 
 ### 请求体
@@ -283,6 +283,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 - `doc_format` 默认 `standard_v1`：兼容当前两类文档格式。
 - `applicant_feishu_id` 必填：可传飞书 `open_id` / `user_id`，也可传公司内唯一姓名；后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - `source` 可选：默认 `feishu_doc_button`，建议多维表格按钮传 `feishu_bitable_button`，方便审计来源。
+- `register_domain` 可选：仅 `domain_purchase` 使用。传入后默认注册该域名，不再从飞书文档正文解析域名；为空时保持原流程，从文档中解析域名。DNS 解析类按钮不需要、也不会使用该参数。
 - 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供，当前默认值为 `54.89.199.228`。
 
 ### 请求字段说明
@@ -294,6 +295,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 | `doc_format` | string | 否 | `standard_v1` | 文档格式标识，当前统一传 `standard_v1` |
 | `applicant_feishu_id` | string | 是 | `张立坤` | 点击按钮的申请人；支持飞书 `open_id`、`user_id` 或公司内唯一姓名 |
 | `source` | string | 否 | `feishu_bitable_button` | 请求来源标记，用于审计和排查 |
+| `register_domain` | string | 否 | `example.com` | 仅域名购买按钮使用；为空则从文档解析域名 |
 
 ### 飞书按钮配置示例
 
@@ -305,9 +307,12 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
   "doc_url": "{{文档链接}}",
   "doc_format": "standard_v1",
   "applicant_feishu_id": "{{当前用户姓名}}",
-  "source": "feishu_bitable_button"
+  "source": "feishu_bitable_button",
+  "register_domain": "{{域名}}"
 }
 ```
+
+> `register_domain` 只配置在域名购买按钮上；Clerk、后端、Vercel、CF、GSC 等 DNS 解析按钮不要配置该字段。
 
 一键解析按钮（Clerk + 后端 + Vercel + CF，不含购买和 GSC）：
 

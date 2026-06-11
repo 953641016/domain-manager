@@ -324,6 +324,19 @@ class DocButtonSubmitBody(BaseModel):
     applicant_feishu_id: str
     source: str = "feishu_doc_button"
     verification_token: Optional[str] = None
+    register_domain: Optional[str] = None
+
+
+def _resolve_register_domain_override(action: str, register_domain: Optional[str]) -> Optional[str]:
+    action_meta = DOC_BUTTON_ACTIONS.get(action)
+    if not action_meta or action_meta.get("request_type") != "domain_register":
+        return None
+    if not str(register_domain or "").strip():
+        return None
+    domain = _normalize_domain_name(register_domain)
+    if not domain:
+        raise ValueError("register_domain 格式不正确，请传入完整域名，例如 example.com")
+    return domain
 
 
 @router.post("/doc-button/submit")
@@ -335,6 +348,7 @@ def submit_doc_button_request(
     applicant_feishu_id: Optional[str] = Query(default=None),
     source: str = Query(default="feishu_doc_button"),
     verification_token: Optional[str] = Query(default=None),
+    register_domain: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """飞书文档/多维表格按钮触发：读取文档内容，创建待审批申请，发送审批卡片。"""
@@ -353,6 +367,7 @@ def submit_doc_button_request(
             applicant_feishu_id=applicant_feishu_id,
             source=source,
             verification_token=verification_token,
+            register_domain=register_domain,
         )
 
     if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
@@ -375,7 +390,23 @@ def submit_doc_button_request(
         raise HTTPException(status_code=400, detail="未找到可审批的归属域名专员")
 
     try:
-        parsed = FeishuDocParser().parse(body.doc_url, body.action, body.doc_format)
+        register_domain_override = _resolve_register_domain_override(body.action, body.register_domain)
+        if register_domain_override:
+            from app.services.feishu_doc_parser import ParsedDocRequest
+
+            doc_parser = FeishuDocParser()
+            parsed = ParsedDocRequest(
+                doc_token=doc_parser.resolve_doc_token(body.doc_url),
+                doc_url=body.doc_url,
+                title=register_domain_override,
+                domain=register_domain_override,
+                action=body.action,
+                request_type="domain_register",
+                records=[],
+                raw_sections={"domain_source": "request_param"},
+            )
+        else:
+            parsed = FeishuDocParser().parse(body.doc_url, body.action, body.doc_format)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -390,6 +421,11 @@ def submit_doc_button_request(
     }
     if parsed.request_type == "domain_register":
         request_data["domain"] = parsed.domain
+        if register_domain_override:
+            request_data["register_domain"] = parsed.domain
+            request_data["domain_source"] = "request_param"
+        else:
+            request_data["domain_source"] = "feishu_doc"
     else:
         request_data["dns_provider"] = body.action
         request_data["domain"] = parsed.domain
