@@ -21,6 +21,7 @@ from app.services.domain_service import DomainService
 from app.services.audit_service import AuditService
 from app.services.feishu_service import FeishuService
 from app.adapters.registrar_factory import RegistrarFactory
+from app.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +83,8 @@ class ExecutionService:
         self._notify(request, result)
         if is_async_register:
             self._start_registration_finalizer(request.id, result)
+        elif request.type == "domain_register" and success:
+            self._maybe_create_backend_dns_request_after_registration(request, result)
         return result
 
     # ==================== DNS 解析执行 ====================
@@ -416,6 +419,8 @@ class ExecutionService:
             db.refresh(request)
             service._safe_audit(request, final_result)
             service._notify(request, final_result)
+            if final_success:
+                service._maybe_create_backend_dns_request_after_registration(request, final_result)
         except Exception:
             db.rollback()
             logger.exception("后台查询域名注册最终结果失败: %s", request_id)
@@ -454,6 +459,119 @@ class ExecutionService:
                 logger.exception("注册最终成功但写入域名表失败")
 
         return final_result
+
+    # ==================== 注册成功后的后端解析申请 ====================
+
+    @staticmethod
+    def _build_auto_backend_dns_request_data(request: Request, target: Optional[str] = None) -> Dict[str, Any]:
+        original_data = request.request_data or {}
+        target_value = target or Config.BACKEND_DNS_DEFAULT_TARGET
+        return {
+            "action": "backend_dns",
+            "action_label": "后端接口服务域名解析",
+            "doc_url": original_data.get("doc_url"),
+            "doc_token": original_data.get("doc_token"),
+            "doc_title": original_data.get("doc_title") or request.domain_name,
+            "doc_format": original_data.get("doc_format") or "standard_v1",
+            "domain": request.domain_name,
+            "dns_provider": "backend_dns",
+            "auto_created": True,
+            "auto_created_reason": "domain_register_completed",
+            "source_request_id": request.id,
+            "records": [
+                {
+                    "hostname": "svc",
+                    "type": "A",
+                    "target": target_value,
+                    "provider_section": "backend",
+                    "ttl": 300,
+                }
+            ],
+        }
+
+    @staticmethod
+    def _is_backend_dns_request(request: Request) -> bool:
+        data = request.request_data or {}
+        if data.get("action") == "backend_dns":
+            return True
+        for record in data.get("records") or []:
+            if record.get("provider_section") == "backend":
+                return True
+        return False
+
+    def _has_active_backend_dns_request(self, domain_name: str) -> bool:
+        candidates = self.db.query(Request).filter(
+            Request.type == "dns_record",
+            Request.domain_name == domain_name,
+            Request.status.in_(["pending", "approved", "completed"]),
+        ).all()
+        return any(self._is_backend_dns_request(item) for item in candidates)
+
+    def _maybe_create_backend_dns_request_after_registration(self, request: Request, result: Dict[str, Any]) -> None:
+        if (
+            request.type != "domain_register"
+            or not result.get("success")
+            or result.get("registration_pending")
+            or not request.domain_name
+        ):
+            return
+        if self._has_active_backend_dns_request(request.domain_name):
+            return
+
+        requester = request.requester
+        reviewer = request.approver
+        if not requester or not reviewer or reviewer.role not in ("domain_spec", "super_admin"):
+            logger.warning(
+                "注册成功后自动发起后端解析申请失败：缺少申请人或有效域名专员 request_id=%s domain=%s",
+                request.id,
+                request.domain_name,
+            )
+            return
+
+        try:
+            from app.api.v1.feishu import (
+                _get_reviewable_dns_accounts,
+                _pick_default_dns_account,
+                _send_doc_request_approval_card,
+            )
+            from app.schemas.request import RequestCreate
+            from app.services.request_service import RequestService
+
+            accounts = _get_reviewable_dns_accounts(self.db, reviewer)
+            request_data = self._build_auto_backend_dns_request_data(request)
+            default_account = (
+                _pick_default_dns_account(self.db, reviewer, request.domain_name, accounts)
+                if accounts else None
+            )
+            if default_account:
+                request_data["default_dns_account_id"] = default_account.id
+                request_data["default_dns_provider_code"] = default_account.provider_code
+
+            dns_request = RequestService(self.db).create_request(
+                data=RequestCreate(
+                    type="dns_record",
+                    domain_name=request.domain_name,
+                    request_data=request_data,
+                    source="auto_backend_dns",
+                ),
+                requester_id=requester.id,
+                requester_name=requester.name,
+            )
+            if not accounts:
+                logger.warning(
+                    "注册成功后已创建后端解析申请，但域名专员无可用 DNS 账号，未发送飞书审批卡 reviewer_id=%s domain=%s dns_request_id=%s",
+                    reviewer.id,
+                    request.domain_name,
+                    dns_request.id,
+                )
+                return
+            _send_doc_request_approval_card(dns_request, requester, reviewer, accounts, self.db)
+        except Exception:
+            logger.exception(
+                "注册成功后自动发起后端解析申请异常: source_request_id=%s domain=%s",
+                request.id,
+                request.domain_name,
+            )
 
     # ==================== 差异化通知 ====================
 

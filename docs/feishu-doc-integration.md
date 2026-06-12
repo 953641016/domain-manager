@@ -314,6 +314,8 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 
 > `register_domain` 只配置在域名购买按钮上；Clerk、后端、Vercel、CF、GSC 等 DNS 解析按钮不要配置该字段。
 
+> 域名注册成功后，系统会自动为同一域名创建 `backend_dns` 待审批申请，并发送给同一个域名专员审批；因此注册流程不需要再额外点击“后端接口服务域名解析”按钮。自动申请默认生成 `svc` 的 A 记录，目标值为 `BACKEND_DNS_DEFAULT_TARGET`。
+
 一键解析按钮（Clerk + 后端 + Vercel + CF，不含购买和 GSC）：
 
 ```json

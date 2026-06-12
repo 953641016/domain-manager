@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **注册成功后自动发起后端解析申请**（`backend/app/services/execution_service.py`）：域名注册最终成功后自动创建 `backend_dns` 待审批申请，默认生成 `svc` A 记录到 `BACKEND_DNS_DEFAULT_TARGET`，并发送给同一域名专员审批；若同域名已有待处理/已完成后端解析申请则不重复创建。
 - **域名购买直传域名参数**（`backend/app/api/v1/feishu.py`、`docs/feishu-doc-integration.md`）：飞书文档按钮 `domain_purchase` 支持可选 `register_domain` 参数；传入时以该域名作为注册目标，不再从文档正文解析域名，为空则保持原文档解析流程，DNS 解析类按钮不使用该参数。
 - **Cloudflare Token 权限说明**（`docs/CLOUDFLARE_TOKEN_PERMISSIONS.md`、`frontend/src/pages/Help/CloudflareTokenPermissions.tsx`）：新增 Cloudflare DNS 解析、重定向规则和 Registrar Token 最小权限配置说明；后台新增 `/help/cloudflare-token-permissions` 可读页面，并在 DNS账号管理页提供入口。
 - **飞书卡片回调开发规范**（`docs/feishu-card-design-spec.md`）：新增 `200341` 超时避坑规则，明确卡片回调 3 秒内返回、禁止响应前调用外部 API 或更新卡片，后续慢操作必须后台化。
