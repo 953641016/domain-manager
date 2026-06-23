@@ -43,3 +43,80 @@ def test_parse_vercel_domains_records_json_block():
             "ttl": 300,
         },
     ]
+
+
+def test_parse_clerk_domains_records_before_vercel_block():
+    parser = FeishuDocParser()
+    lines = [
+        "Vercel Dns解析",
+        '"domainsRecords": [',
+        "{",
+        '"host": "clerk.seedream5pro.co",',
+        '"type": "CNAME",',
+        '"value": "frontend-api.clerk.services"',
+        "},",
+        "{",
+        '"host": "accounts.seedream5pro.co",',
+        '"type": "CNAME",',
+        '"value": "accounts.clerk.services"',
+        "}",
+        "],",
+        '"vercelDomainsRecords": [',
+        "{",
+        '"host": "seedream5pro.co",',
+        '"name": "@",',
+        '"type": "A",',
+        '"value": "216.150.1.1"',
+        "}",
+        "]",
+        "seedream5pro.co 的 Clerk DNS 配置说明",
+    ]
+
+    records = parser._parse_clerk(lines, "seedream5pro.co")
+
+    assert records == [
+        {
+            "hostname": "clerk",
+            "type": "CNAME",
+            "target": "frontend-api.clerk.services",
+            "provider_section": "clerk",
+            "ttl": 300,
+        },
+        {
+            "hostname": "accounts",
+            "type": "CNAME",
+            "target": "accounts.clerk.services",
+            "provider_section": "clerk",
+            "ttl": 300,
+        },
+    ]
+
+
+def test_clerk_domains_records_marker_does_not_match_vercel_key():
+    parser = FeishuDocParser()
+    lines = [
+        "Vercel Dns解析",
+        '"vercelDomainsRecords": [',
+        '{"host": "www.example.com", "name": "www", "type": "CNAME", "value": "target.example.com."}',
+        "]",
+    ]
+
+    records = parser._parse_clerk(lines, "example.com")
+
+    assert records == []
+
+
+def test_extract_domain_from_markdown_domain_heading():
+    lines = [
+        "Seedream 5.0 AI Image Generator",
+        "### 2、域名",
+        '<callout emoji="🌀">',
+        "# seedream5pro.co",
+        "</callout>",
+    ]
+
+    assert FeishuDocParser._extract_domain(lines, "Seedream 5.0 Pro") == "seedream5pro.co"
+
+
+def test_first_domain_ignores_numeric_version():
+    assert FeishuDocParser._first_domain("Seedream 5.0 Pro") == ""

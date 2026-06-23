@@ -224,19 +224,27 @@ class FeishuDocParser:
                 return match.group(1).lower().rstrip(".")
         for idx, line in enumerate(lines):
             if line == "域名购买" and idx + 1 < len(lines):
-                candidate = FeishuDocParser._first_domain(lines[idx + 1])
+                candidate = FeishuDocParser._first_domain_near(lines, idx + 1)
                 if candidate:
                     return candidate
         for idx, line in enumerate(lines):
-            if re.fullmatch(r"(?:\d+[、.])?\s*域名\s*", line) and idx + 1 < len(lines):
-                candidate = FeishuDocParser._first_domain(lines[idx + 1])
+            if re.fullmatch(r"(?:#+\s*)?(?:\d+[、.])?\s*域名\s*", line) and idx + 1 < len(lines):
+                candidate = FeishuDocParser._first_domain_near(lines, idx + 1)
                 if candidate:
                     return candidate
         return FeishuDocParser._first_domain(title) or ""
 
     @staticmethod
+    def _first_domain_near(lines: List[str], start: int, limit: int = 6) -> str:
+        for line in lines[start:start + limit]:
+            candidate = FeishuDocParser._first_domain(line)
+            if candidate:
+                return candidate
+        return ""
+
+    @staticmethod
     def _first_domain(text: str) -> str:
-        match = re.search(r"([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+)", text)
+        match = re.search(r"([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})", text)
         return match.group(1).lower().rstrip(".") if match else ""
 
     @staticmethod
@@ -334,6 +342,14 @@ class FeishuDocParser:
             idx += 1
         for record in self._parse_json_like_records(section, domain, "clerk"):
             self._append_record_once(records, record)
+        for record in self._parse_json_like_records_after_marker(
+            lines,
+            "domainsRecords",
+            domain,
+            "clerk",
+            ["vercelDomainsRecords", "后端接口服务域名解析", "三、后端接口", "GSC", "四、", "接口域名解析"],
+        ):
+            self._append_record_once(records, record)
         return records
 
     def _parse_gsc(self, lines: List[str]) -> List[Dict[str, Any]]:
@@ -412,9 +428,8 @@ class FeishuDocParser:
         stop_markers: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         start = None
-        marker_lower = marker.lower()
         for idx, line in enumerate(lines):
-            if marker_lower in line.lower():
+            if self._line_has_marker(line, marker):
                 start = idx + 1
                 break
         if start is None:
@@ -423,10 +438,16 @@ class FeishuDocParser:
         scoped_lines = []
         stop_markers = stop_markers or []
         for line in lines[start:]:
-            if scoped_lines and any(stop_marker in line for stop_marker in stop_markers):
+            if scoped_lines and any(self._line_has_marker(line, stop_marker) for stop_marker in stop_markers):
                 break
             scoped_lines.append(line)
         return self._parse_json_like_records_from_lines(scoped_lines, domain, section)
+
+    @staticmethod
+    def _line_has_marker(line: str, marker: str) -> bool:
+        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", marker or ""):
+            return bool(re.search(rf'(?<![A-Za-z0-9_])["“”]?{re.escape(marker)}["“”]?\s*[:：]', line, flags=re.I))
+        return marker in line
 
     def _parse_json_like_records_from_lines(self, lines: List[str], domain: str, section: str) -> List[Dict[str, Any]]:
         records: List[Dict[str, Any]] = []
