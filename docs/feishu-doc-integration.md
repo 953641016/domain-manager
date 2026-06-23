@@ -278,7 +278,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 }
 ```
 
-- `doc_url` 必填：后端从 URL 中提取 docx token。
+- `doc_url` 条件必填：DNS 解析类按钮必填；域名购买按钮如果传了 `register_domain`，可不传 `doc_url`，后端不会解析文档 token。
 - `action` 必填：决定解析文档中的哪一段。
 - `doc_format` 默认 `standard_v1`：兼容当前两类文档格式。
 - `applicant_feishu_id` 必填：可传飞书 `open_id` / `user_id`，也可传公司内唯一姓名；后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
@@ -291,7 +291,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 | 字段 | 类型 | 必填 | 示例 | 说明 |
 |------|------|------|------|------|
 | `action` | string | 是 | `all_dns_except_gsc` | 本次申请动作，取值见“按钮行为”表 |
-| `doc_url` | string | 是 | `https://z78zepeihr.feishu.cn/docx/xxxx` | 飞书文档链接，后端从链接提取 docx token |
+| `doc_url` | string | 条件必填 | `https://z78zepeihr.feishu.cn/docx/xxxx` | 飞书文档链接；DNS 解析类按钮必填，`domain_purchase` 传 `register_domain` 时可省略 |
 | `doc_format` | string | 否 | `standard_v1` | 文档格式标识，当前统一传 `standard_v1` |
 | `applicant_feishu_id` | string | 是 | `张立坤` | 点击按钮的申请人；支持飞书 `open_id`、`user_id` 或公司内唯一姓名 |
 | `source` | string | 否 | `feishu_bitable_button` | 请求来源标记，用于审计和排查 |
@@ -312,7 +312,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 }
 ```
 
-> `register_domain` 只配置在域名购买按钮上；Clerk、后端、Vercel、CF、GSC 等 DNS 解析按钮不要配置该字段。
+> `register_domain` 只配置在域名购买按钮上；Clerk、后端、Vercel、CF、GSC 等 DNS 解析按钮不要配置该字段。域名购买按钮传 `register_domain` 后，`doc_url` 可以为空；后端只保存来源链接，不解析文档 token。
 
 > 域名注册成功后，系统会自动为同一域名创建 `backend_dns` 待审批申请，并发送给同一个域名专员审批；因此注册流程不需要再额外点击“后端接口服务域名解析”按钮。自动申请默认生成 `svc` 的 A 记录，目标值为 `BACKEND_DNS_DEFAULT_TARGET`。
 

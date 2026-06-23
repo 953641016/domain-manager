@@ -319,7 +319,7 @@ async def send_card(request: SendCardRequest):
 
 class DocButtonSubmitBody(BaseModel):
     action: str
-    doc_url: str
+    doc_url: Optional[str] = None
     doc_format: str = "standard_v1"
     applicant_feishu_id: str
     source: str = "feishu_doc_button"
@@ -337,6 +337,18 @@ def _resolve_register_domain_override(action: str, register_domain: Optional[str
     if not domain:
         raise ValueError("register_domain 格式不正确，请传入完整域名，例如 example.com")
     return domain
+
+
+def _requires_doc_url_for_doc_button(action: str, register_domain: Optional[str]) -> bool:
+    return _resolve_register_domain_override(action, register_domain) is None
+
+
+def _format_source_doc_line(data: Dict[str, Any]) -> str:
+    doc_url = data.get("doc_url")
+    doc_title = data.get("doc_title") or "飞书文档"
+    if doc_url:
+        return f"**来源文档**：[{doc_title}]({doc_url})"
+    return "**来源文档**：未提供"
 
 
 @router.post("/doc-button/submit")
@@ -358,8 +370,17 @@ def submit_doc_button_request(
     from app.schemas.request import RequestCreate
 
     if body is None:
-        if not action or not doc_url or not applicant_feishu_id:
-            raise HTTPException(status_code=422, detail="缺少必要参数: action、doc_url、applicant_feishu_id")
+        if not action or not applicant_feishu_id:
+            raise HTTPException(status_code=422, detail="缺少必要参数: action、applicant_feishu_id")
+        try:
+            doc_url_required = _requires_doc_url_for_doc_button(action, register_domain)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if doc_url_required and not doc_url:
+            raise HTTPException(
+                status_code=422,
+                detail="缺少必要参数: doc_url；domain_purchase 传 register_domain 时 doc_url 可省略",
+            )
         body = DocButtonSubmitBody(
             action=action,
             doc_url=doc_url,
@@ -394,10 +415,9 @@ def submit_doc_button_request(
         if register_domain_override:
             from app.services.feishu_doc_parser import ParsedDocRequest
 
-            doc_parser = FeishuDocParser()
             parsed = ParsedDocRequest(
-                doc_token=doc_parser.resolve_doc_token(body.doc_url),
-                doc_url=body.doc_url,
+                doc_token="",
+                doc_url=body.doc_url or "",
                 title=register_domain_override,
                 domain=register_domain_override,
                 action=body.action,
@@ -966,7 +986,7 @@ def _build_domain_purchase_approval_card(req, applicant, reviewer, accounts: Lis
                         f"**域名**：{req.domain_name}\n"
                         f"**申请人**：{applicant.name}\n"
                         f"**申请时间**：{_format_card_time(req.created_at)}\n"
-                        f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})\n"
+                        f"{_format_source_doc_line(data)}\n"
                         f"**注册服务商**：请在下方选择\n"
                         f"**预估价格**：见下方服务商报价，最终以审批执行时重新查价为准"
                     ),
@@ -1087,7 +1107,7 @@ def _build_dns_doc_approval_card(req, applicant, reviewer, accounts: List[Any]) 
                         f"**申请人**：{applicant.name}\n"
                         f"**申请时间**：{_format_card_time(req.created_at)}\n"
                         f"**记录数**：{len(records)}\n"
-                        f"**来源文档**：[{data.get('doc_title', '飞书文档')}]({data.get('doc_url', '')})"
+                        f"{_format_source_doc_line(data)}"
                     ),
                 },
             },
