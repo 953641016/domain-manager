@@ -120,3 +120,18 @@ def test_extract_domain_from_markdown_domain_heading():
 
 def test_first_domain_ignores_numeric_version():
     assert FeishuDocParser._first_domain("Seedream 5.0 Pro") == ""
+
+
+def test_parse_metadata_does_not_require_dns_records(monkeypatch):
+    parser = FeishuDocParser()
+    monkeypatch.setattr(parser, "resolve_doc_token", lambda doc_url: "doc_token")
+    monkeypatch.setattr(parser, "get_document_title", lambda doc_token: "GSC example.com 开发需求")
+    monkeypatch.setattr(parser, "get_raw_content", lambda doc_token: "只有域名 example.com，没有 GSC 认证段落")
+
+    parsed = parser.parse_metadata("https://z78zepeihr.feishu.cn/docx/example", "gsc_dns")
+
+    assert parsed.doc_token == "doc_token"
+    assert parsed.domain == "example.com"
+    assert parsed.request_type == "dns_record"
+    assert parsed.records == []
+    assert parsed.raw_sections == {"metadata_only": True}

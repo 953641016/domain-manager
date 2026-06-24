@@ -103,6 +103,32 @@ class FeishuDocParser:
             raw_sections=sections,
         )
 
+    def parse_metadata(self, doc_url: str, action: str, doc_format: str = "standard_v1") -> ParsedDocRequest:
+        if action not in ACTION_LABELS:
+            raise ValueError(f"未知 action: {action}")
+        if doc_format != "standard_v1":
+            raise ValueError(f"暂不支持的文档格式: {doc_format}")
+
+        doc_token = self.resolve_doc_token(doc_url)
+        title = self.get_document_title(doc_token)
+        content = self.get_raw_content(doc_token)
+        lines = self._normal_lines(content)
+        domain = self._extract_domain(lines, title)
+        if not domain:
+            raise ValueError("未能从文档中解析出主域名")
+
+        request_type = "domain_register" if action == "domain_purchase" else "dns_record"
+        return ParsedDocRequest(
+            doc_token=doc_token,
+            doc_url=doc_url,
+            title=title,
+            domain=domain,
+            action=action,
+            request_type=request_type,
+            records=[],
+            raw_sections={"metadata_only": True},
+        )
+
     @staticmethod
     def extract_doc_token(doc_url: str) -> str:
         doc_token = FeishuDocParser._extract_token_by_type(doc_url, "docx")

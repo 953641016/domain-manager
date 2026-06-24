@@ -284,6 +284,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 - `applicant_feishu_id` 必填：可传飞书 `open_id` / `user_id`，也可传公司内唯一姓名；后端优先按姓名精确匹配，匹配不到再按飞书 ID 匹配。
 - `source` 可选：默认 `feishu_doc_button`，建议多维表格按钮传 `feishu_bitable_button`，方便审计来源。
 - `register_domain` 可选：仅 `domain_purchase` 使用。传入后默认注册该域名，不再从飞书文档正文解析域名；为空时保持原流程，从文档中解析域名。DNS 解析类按钮不需要、也不会使用该参数。
+- `gsc_verification` 可选：仅 `gsc_dns` 使用。传入 `google-site-verification=...` 时，GSC TXT 记录值直接使用该参数；为空或不传时保持原流程，从飞书文档中解析 GSC 认证值。主域名仍从 `doc_url` 对应文档解析，因此 `doc_url` 仍必填。
 - 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供，当前默认值为 `54.89.199.228`。
 
 ### 请求字段说明
@@ -296,6 +297,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 | `applicant_feishu_id` | string | 是 | `张立坤` | 点击按钮的申请人；支持飞书 `open_id`、`user_id` 或公司内唯一姓名 |
 | `source` | string | 否 | `feishu_bitable_button` | 请求来源标记，用于审计和排查 |
 | `register_domain` | string | 否 | `example.com` | 仅域名购买按钮使用；为空则从文档解析域名 |
+| `gsc_verification` | string | 否 | `google-site-verification=6BUD50tqa1HftbPi51zWqGo4vosFqyt7r7FAOMfFdHY` | 仅 GSC 认证解析使用；为空则从文档解析 |
 
 ### 飞书按钮配置示例
 
@@ -329,6 +331,19 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 ```
 
 单项解析按钮只需要替换 `action`，例如 `clerk_dns`、`backend_dns`、`vercel_dns`、`cf_dns`、`gsc_dns`。
+
+GSC 认证解析按钮如果多维表格里已有认证值，可直接传 `gsc_verification`：
+
+```json
+{
+  "action": "gsc_dns",
+  "doc_url": "{{文档链接}}",
+  "doc_format": "standard_v1",
+  "applicant_feishu_id": "{{当前用户姓名}}",
+  "source": "feishu_bitable_button",
+  "gsc_verification": "{{GSC认证值}}"
+}
+```
 
 ### 成功响应
 

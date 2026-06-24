@@ -325,6 +325,7 @@ class DocButtonSubmitBody(BaseModel):
     source: str = "feishu_doc_button"
     verification_token: Optional[str] = None
     register_domain: Optional[str] = None
+    gsc_verification: Optional[str] = None
 
 
 def _resolve_register_domain_override(action: str, register_domain: Optional[str]) -> Optional[str]:
@@ -341,6 +342,28 @@ def _resolve_register_domain_override(action: str, register_domain: Optional[str
 
 def _requires_doc_url_for_doc_button(action: str, register_domain: Optional[str]) -> bool:
     return _resolve_register_domain_override(action, register_domain) is None
+
+
+def _normalize_gsc_verification(gsc_verification: Optional[str]) -> Optional[str]:
+    text = str(gsc_verification or "").strip()
+    if not text:
+        return None
+    text = text.strip("`\"'")
+    if text.upper().startswith("TXT "):
+        text = text[4:].strip().strip("`\"'")
+    if not text.startswith("google-site-verification="):
+        raise ValueError("gsc_verification 格式不正确，请传入 google-site-verification=xxxx")
+    return text
+
+
+def _build_gsc_verification_record(gsc_verification: str) -> Dict[str, Any]:
+    return {
+        "hostname": "@",
+        "type": "TXT",
+        "target": gsc_verification,
+        "provider_section": "gsc",
+        "ttl": 300,
+    }
 
 
 def _format_source_doc_line(data: Dict[str, Any]) -> str:
@@ -361,6 +384,7 @@ def submit_doc_button_request(
     source: str = Query(default="feishu_doc_button"),
     verification_token: Optional[str] = Query(default=None),
     register_domain: Optional[str] = Query(default=None),
+    gsc_verification: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """飞书文档/多维表格按钮触发：读取文档内容，创建待审批申请，发送审批卡片。"""
@@ -389,6 +413,7 @@ def submit_doc_button_request(
             source=source,
             verification_token=verification_token,
             register_domain=register_domain,
+            gsc_verification=gsc_verification,
         )
 
     if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
@@ -412,6 +437,9 @@ def submit_doc_button_request(
 
     try:
         register_domain_override = _resolve_register_domain_override(body.action, body.register_domain)
+        gsc_verification_override = None
+        if body.action == "gsc_dns":
+            gsc_verification_override = _normalize_gsc_verification(body.gsc_verification)
         if register_domain_override:
             from app.services.feishu_doc_parser import ParsedDocRequest
 
@@ -425,6 +453,10 @@ def submit_doc_button_request(
                 records=[],
                 raw_sections={"domain_source": "request_param"},
             )
+        elif gsc_verification_override:
+            parsed = FeishuDocParser().parse_metadata(body.doc_url, body.action, body.doc_format)
+            parsed.records = [_build_gsc_verification_record(gsc_verification_override)]
+            parsed.raw_sections = {"gsc_source": "request_param"}
         else:
             parsed = FeishuDocParser().parse(body.doc_url, body.action, body.doc_format)
     except ValueError as e:
@@ -449,6 +481,9 @@ def submit_doc_button_request(
     else:
         request_data["dns_provider"] = body.action
         request_data["domain"] = parsed.domain
+        if body.action == "gsc_dns" and gsc_verification_override:
+            request_data["gsc_verification"] = gsc_verification_override
+            request_data["gsc_source"] = "request_param"
 
     if parsed.request_type == "domain_register":
         accounts = _get_reviewable_reg_accounts(db, specialist)
