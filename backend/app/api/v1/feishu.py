@@ -344,37 +344,6 @@ def _requires_doc_url_for_doc_button(action: str, register_domain: Optional[str]
     return _resolve_register_domain_override(action, register_domain) is None
 
 
-def _preview_log_value(value: Optional[str], max_length: int = 160) -> Dict[str, Any]:
-    text = "" if value is None else str(value)
-    preview = text.replace("\r", "\\r").replace("\n", "\\n")
-    if len(preview) > max_length:
-        preview = f"{preview[:max_length]}..."
-    return {
-        "present": value is not None,
-        "length": len(text),
-        "preview": preview,
-    }
-
-
-def _log_gsc_doc_button_input(body: DocButtonSubmitBody) -> None:
-    raw = body.gsc_verification
-    stripped = str(raw or "").strip().strip("`\"'")
-    if stripped.upper().startswith("TXT "):
-        stripped = stripped[4:].strip().strip("`\"'")
-    preview = _preview_log_value(raw)
-    logging.getLogger("gunicorn.error").warning(
-        "飞书GSC按钮参数: applicant=%s source=%s doc_url_present=%s "
-        "gsc_present=%s gsc_length=%s gsc_startswith_expected=%s gsc_preview=%r",
-        body.applicant_feishu_id,
-        body.source,
-        bool(body.doc_url),
-        preview["present"],
-        preview["length"],
-        stripped.startswith("google-site-verification="),
-        preview["preview"],
-    )
-
-
 def _normalize_gsc_verification(gsc_verification: Optional[str]) -> Optional[str]:
     text = str(gsc_verification or "").strip()
     if not text:
@@ -424,10 +393,18 @@ def submit_doc_button_request(
     from app.services.feishu_doc_parser import FeishuDocParser
     from app.schemas.request import RequestCreate
 
-    body_from_query = body is None
-    if body_from_query:
+    if body is None:
         if not action or not applicant_feishu_id:
             raise HTTPException(status_code=422, detail="缺少必要参数: action、applicant_feishu_id")
+        try:
+            doc_url_required = _requires_doc_url_for_doc_button(action, register_domain)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if doc_url_required and not doc_url:
+            raise HTTPException(
+                status_code=422,
+                detail="缺少必要参数: doc_url；domain_purchase 传 register_domain 时 doc_url 可省略",
+            )
         body = DocButtonSubmitBody(
             action=action,
             doc_url=doc_url,
@@ -438,20 +415,6 @@ def submit_doc_button_request(
             register_domain=register_domain,
             gsc_verification=gsc_verification,
         )
-
-    if body.action == "gsc_dns":
-        _log_gsc_doc_button_input(body)
-
-    if body_from_query:
-        try:
-            doc_url_required = _requires_doc_url_for_doc_button(body.action, body.register_domain)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        if doc_url_required and not body.doc_url:
-            raise HTTPException(
-                status_code=422,
-                detail="缺少必要参数: doc_url；domain_purchase 传 register_domain 时 doc_url 可省略",
-            )
 
     if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
         if body.verification_token != Config.FEISHU_VERIFICATION_TOKEN:
@@ -476,14 +439,7 @@ def submit_doc_button_request(
         register_domain_override = _resolve_register_domain_override(body.action, body.register_domain)
         gsc_verification_override = None
         if body.action == "gsc_dns":
-            try:
-                gsc_verification_override = _normalize_gsc_verification(body.gsc_verification)
-            except ValueError:
-                logging.getLogger("gunicorn.error").warning(
-                    "飞书GSC按钮认证值格式错误: %s",
-                    _preview_log_value(body.gsc_verification),
-                )
-                raise
+            gsc_verification_override = _normalize_gsc_verification(body.gsc_verification)
         if register_domain_override:
             from app.services.feishu_doc_parser import ParsedDocRequest
 
