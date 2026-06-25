@@ -362,7 +362,7 @@ def _log_gsc_doc_button_input(body: DocButtonSubmitBody) -> None:
     if stripped.upper().startswith("TXT "):
         stripped = stripped[4:].strip().strip("`\"'")
     preview = _preview_log_value(raw)
-    logging.getLogger(__name__).info(
+    logging.getLogger("gunicorn.error").warning(
         "飞书GSC按钮参数: applicant=%s source=%s doc_url_present=%s "
         "gsc_present=%s gsc_length=%s gsc_startswith_expected=%s gsc_preview=%r",
         body.applicant_feishu_id,
@@ -479,7 +479,7 @@ def submit_doc_button_request(
             try:
                 gsc_verification_override = _normalize_gsc_verification(body.gsc_verification)
             except ValueError:
-                logging.getLogger(__name__).warning(
+                logging.getLogger("gunicorn.error").warning(
                     "飞书GSC按钮认证值格式错误: %s",
                     _preview_log_value(body.gsc_verification),
                 )
