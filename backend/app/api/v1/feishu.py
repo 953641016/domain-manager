@@ -424,18 +424,10 @@ def submit_doc_button_request(
     from app.services.feishu_doc_parser import FeishuDocParser
     from app.schemas.request import RequestCreate
 
-    if body is None:
+    body_from_query = body is None
+    if body_from_query:
         if not action or not applicant_feishu_id:
             raise HTTPException(status_code=422, detail="缺少必要参数: action、applicant_feishu_id")
-        try:
-            doc_url_required = _requires_doc_url_for_doc_button(action, register_domain)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        if doc_url_required and not doc_url:
-            raise HTTPException(
-                status_code=422,
-                detail="缺少必要参数: doc_url；domain_purchase 传 register_domain 时 doc_url 可省略",
-            )
         body = DocButtonSubmitBody(
             action=action,
             doc_url=doc_url,
@@ -446,6 +438,20 @@ def submit_doc_button_request(
             register_domain=register_domain,
             gsc_verification=gsc_verification,
         )
+
+    if body.action == "gsc_dns":
+        _log_gsc_doc_button_input(body)
+
+    if body_from_query:
+        try:
+            doc_url_required = _requires_doc_url_for_doc_button(body.action, body.register_domain)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        if doc_url_required and not body.doc_url:
+            raise HTTPException(
+                status_code=422,
+                detail="缺少必要参数: doc_url；domain_purchase 传 register_domain 时 doc_url 可省略",
+            )
 
     if Config.FEISHU_VERIFICATION_TOKEN and body.verification_token:
         if body.verification_token != Config.FEISHU_VERIFICATION_TOKEN:
@@ -470,7 +476,6 @@ def submit_doc_button_request(
         register_domain_override = _resolve_register_domain_override(body.action, body.register_domain)
         gsc_verification_override = None
         if body.action == "gsc_dns":
-            _log_gsc_doc_button_input(body)
             try:
                 gsc_verification_override = _normalize_gsc_verification(body.gsc_verification)
             except ValueError:
