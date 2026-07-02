@@ -372,6 +372,13 @@ class UserOperationConfirmationService:
             user = query.first()
             if user:
                 return user
+            # 多飞书应用场景下，超管可能只归属于默认应用；允许跨应用复用该超管审批。
+            user = self.db.query(User).filter(
+                User.feishu_user_id == feishu_id,
+                User.is_active == True,
+            ).first()
+            if user:
+                return user
         # 兜底：取有飞书ID的活跃超管
         query = self.db.query(User).filter(
             User.role == "super_admin",
@@ -381,7 +388,15 @@ class UserOperationConfirmationService:
         )
         if feishu_app_id:
             query = query.filter(User.feishu_app_id == feishu_app_id)
-        return query.first()
+        user = query.first()
+        if user:
+            return user
+        return self.db.query(User).filter(
+            User.role == "super_admin",
+            User.is_active == True,
+            User.feishu_user_id != None,
+            User.feishu_user_id != "",
+        ).first()
 
     def get_admin_users(self, exclude_user_id: Optional[int] = None) -> List[User]:
         """获取所有管理员用户（用于发送确认消息）"""
@@ -666,13 +681,20 @@ class UserOperationConfirmationService:
             return
 
         try:
-            from app.services.feishu_app_service import FeishuAppService
+            from app.services.feishu_app_service import FeishuAppService, get_feishu_service_for_user
             details = confirmation.operation_details or {}
             feishu_app_id = (
                 (details.get("user_data") or {}).get("feishu_app_id")
                 or details.get("feishu_app_id")
             )
-            result = FeishuAppService(self.db).get_service(app_id=feishu_app_id).update_card_message(
+            service = None
+            if confirmation.approver_user_id:
+                approver = self.db.query(User).filter(User.id == confirmation.approver_user_id).first()
+                if approver:
+                    service = get_feishu_service_for_user(self.db, approver)
+            if service is None:
+                service = FeishuAppService(self.db).get_service(app_id=feishu_app_id)
+            result = service.update_card_message(
                 message_id,
                 self._build_processed_confirmation_card(confirmation, approved, exec_error),
             )
