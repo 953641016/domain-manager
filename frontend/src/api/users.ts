@@ -20,6 +20,7 @@ export async function getUsers(params?: {
   role?: string;
   is_active?: boolean;
   search?: string;
+  feishu_app_id?: number | null;
 }): Promise<UserListResponse> {
   const response = await api.get<UserListResponse>('/users', { params });
   return response.data;

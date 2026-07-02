@@ -20,23 +20,28 @@ class UserService:
         """
         return self.db.query(User).filter(User.id == user_id).first()
 
-    def get_user_by_feishu_userid(self, feishu_userid: str) -> Optional[User]:
+    def get_user_by_feishu_userid(self, feishu_userid: str, feishu_app_id: Optional[int] = None) -> Optional[User]:
         """根据飞书 user_id 获取用户"""
-        return self.db.query(User).filter(User.feishu_user_id == feishu_userid).first()
+        query = self.db.query(User).filter(User.feishu_user_id == feishu_userid)
+        if feishu_app_id is not None:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
+        return query.first()
 
-    def get_user_by_feishu_open_id(self, open_id: str) -> Optional[User]:
+    def get_user_by_feishu_open_id(self, open_id: str, feishu_app_id: Optional[int] = None) -> Optional[User]:
         """根据飞书 open_id 获取用户"""
-        return self.db.query(User).filter(User.feishu_open_id == open_id).first()
+        query = self.db.query(User).filter(User.feishu_open_id == open_id)
+        if feishu_app_id is not None:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
+        return query.first()
 
-    def get_user_by_any_feishu_id(self, feishu_id: str) -> Optional[User]:
+    def get_user_by_any_feishu_id(self, feishu_id: str, feishu_app_id: Optional[int] = None) -> Optional[User]:
         """用 open_id 或 user_id 任一匹配即可（卡片回调场景）"""
-        return (
-            self.db.query(User)
-            .filter(
-                (User.feishu_open_id == feishu_id) | (User.feishu_user_id == feishu_id)
-            )
-            .first()
+        query = self.db.query(User).filter(
+            (User.feishu_open_id == feishu_id) | (User.feishu_user_id == feishu_id)
         )
+        if feishu_app_id is not None:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
+        return query.first()
 
     def get_user_by_name(self, name: str) -> Optional[User]:
         """根据姓名精确匹配用户（飞书多维表格按钮只能传姓名时使用）"""
@@ -66,7 +71,8 @@ class UserService:
         limit: int = 100,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        feishu_app_id: Optional[int] = None,
     ) -> List[User]:
         """
         获取用户列表
@@ -77,6 +83,8 @@ class UserService:
             query = query.filter(User.role == role)
         if is_active is not None:
             query = query.filter(User.is_active == is_active)
+        if feishu_app_id is not None:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
         if search:
             query = query.filter(
                 (User.name.contains(search)) |
@@ -90,7 +98,8 @@ class UserService:
         self,
         role: Optional[str] = None,
         is_active: Optional[bool] = None,
-        search: Optional[str] = None
+        search: Optional[str] = None,
+        feishu_app_id: Optional[int] = None,
     ) -> int:
         """
         获取用户总数
@@ -101,6 +110,8 @@ class UserService:
             query = query.filter(User.role == role)
         if is_active is not None:
             query = query.filter(User.is_active == is_active)
+        if feishu_app_id is not None:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
         if search:
             query = query.filter(
                 (User.name.contains(search)) |
@@ -118,7 +129,7 @@ class UserService:
             (User, bool) - (用户对象, 是否需要管理员确认)
         """
         # 检查用户是否已存在
-        existing_user = self.get_user_by_feishu_userid(user_in.feishu_userid)
+        existing_user = self.get_user_by_feishu_userid(user_in.feishu_userid, user_in.feishu_app_id)
         if existing_user:
             raise ValueError(f"用户已存在: {user_in.feishu_userid}")
 
@@ -132,6 +143,7 @@ class UserService:
         # 创建用户
         user = User(
             name=user_in.name,
+            feishu_app_id=user_in.feishu_app_id,
             email=user_in.email,
             phone=user_in.phone,
             department=user_in.department,

@@ -6,6 +6,7 @@ from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, Foreign
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.feishu_app import FeishuApp  # noqa: F401 - ensure mapper registry knows this model
 
 
 class User(Base):
@@ -15,6 +16,9 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+
+    # 飞书应用归属。用于支持同一套系统对接多个飞书主体/应用。
+    feishu_app_id = Column(Integer, ForeignKey("feishu_apps.id"), nullable=True, index=True, comment="归属飞书应用ID")
     
     # 用户信息
     name = Column(String(100), nullable=False, comment="用户姓名")
@@ -25,7 +29,7 @@ class User(Base):
     department = Column(String(100), nullable=True, comment="部门")
     
     # 飞书身份
-    feishu_user_id = Column(String(100), nullable=True, unique=True, index=True, comment="飞书用户ID")
+    feishu_user_id = Column(String(100), nullable=True, index=True, comment="飞书用户ID")
     feishu_union_id = Column(String(100), nullable=True, index=True, comment="飞书UnionID")
     feishu_open_id = Column(String(100), nullable=True, comment="飞书OpenID")
     
@@ -48,12 +52,19 @@ class User(Base):
     remark = Column(String(500), nullable=True, comment="备注")
 
     # 关系
+    feishu_app = relationship("FeishuApp", foreign_keys=[feishu_app_id])
     assigned_specialist = relationship("User", foreign_keys=[assigned_specialist_id], remote_side="User.id")
+
+    @property
+    def feishu_app_name(self) -> str | None:
+        return self.feishu_app.name if self.feishu_app else None
 
     def to_dict(self):
         """转换为字典"""
         return {
             "id": self.id,
+            "feishu_app_id": self.feishu_app_id,
+            "feishu_app_name": self.feishu_app.name if self.feishu_app else None,
             "name": self.name,
             "en_name": self.en_name,
             "email": self.email,

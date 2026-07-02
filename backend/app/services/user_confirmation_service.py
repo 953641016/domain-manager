@@ -349,28 +349,39 @@ class UserOperationConfirmationService:
 
         return confirmation
 
-    def get_super_admin(self) -> Optional[User]:
+    def get_super_admin(self, feishu_app_id: Optional[int] = None) -> Optional[User]:
         """
         获取超级管理员。
         优先返回 .env 中 SUPER_ADMIN_FEISHU_USER_ID 指定的用户；
         若未配置或未找到，则返回任意有飞书ID的 super_admin。
         """
         from app.config import Config
-        feishu_id = Config.SUPER_ADMIN_FEISHU_USER_ID
+        from app.models.feishu_app import FeishuApp
+
+        app = None
+        if feishu_app_id:
+            app = self.db.query(FeishuApp).filter(FeishuApp.id == feishu_app_id).first()
+        feishu_id = (app.super_admin_feishu_user_id if app else "") or Config.SUPER_ADMIN_FEISHU_USER_ID
         if feishu_id:
-            user = self.db.query(User).filter(
+            query = self.db.query(User).filter(
                 User.feishu_user_id == feishu_id,
                 User.is_active == True,
-            ).first()
+            )
+            if feishu_app_id:
+                query = query.filter(User.feishu_app_id == feishu_app_id)
+            user = query.first()
             if user:
                 return user
         # 兜底：取有飞书ID的活跃超管
-        return self.db.query(User).filter(
+        query = self.db.query(User).filter(
             User.role == "super_admin",
             User.is_active == True,
             User.feishu_user_id != None,
             User.feishu_user_id != "",
-        ).first()
+        )
+        if feishu_app_id:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
+        return query.first()
 
     def get_admin_users(self, exclude_user_id: Optional[int] = None) -> List[User]:
         """获取所有管理员用户（用于发送确认消息）"""
@@ -384,12 +395,15 @@ class UserOperationConfirmationService:
 
         return query.all()
 
-    def get_user_by_feishu_id(self, feishu_userid: str) -> Optional[User]:
+    def get_user_by_feishu_id(self, feishu_userid: str, feishu_app_id: Optional[int] = None) -> Optional[User]:
         """通过飞书用户ID获取用户（open_id / user_id 均可）"""
-        return self.db.query(User).filter(
+        query = self.db.query(User).filter(
             (User.feishu_user_id == feishu_userid) | (User.feishu_open_id == feishu_userid),
             User.is_active == True,
-        ).first()
+        )
+        if feishu_app_id:
+            query = query.filter(User.feishu_app_id == feishu_app_id)
+        return query.first()
 
     # ==================== 执行实际操作 ====================
 
@@ -576,8 +590,8 @@ class UserOperationConfirmationService:
             ],
         }
         try:
-            from app.services.feishu_service import FeishuService
-            FeishuService().send_card_message(receive_id, result_card, receive_type)
+            from app.services.feishu_app_service import get_feishu_service_for_user
+            get_feishu_service_for_user(self.db, initiator).send_card_message(receive_id, result_card, receive_type)
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给发起人失败")
@@ -634,8 +648,8 @@ class UserOperationConfirmationService:
             "elements": [{"tag": "div", "text": {"tag": "lark_md", "content": body}}],
         }
         try:
-            from app.services.feishu_service import FeishuService
-            FeishuService().send_card_message(receive_id, card, receive_type)
+            from app.services.feishu_app_service import get_feishu_service_for_user
+            get_feishu_service_for_user(self.db, approver).send_card_message(receive_id, card, receive_type)
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给审核人失败，user_id=%s", confirmation.approver_user_id)
@@ -652,8 +666,13 @@ class UserOperationConfirmationService:
             return
 
         try:
-            from app.services.feishu_service import FeishuService
-            result = FeishuService().update_card_message(
+            from app.services.feishu_app_service import FeishuAppService
+            details = confirmation.operation_details or {}
+            feishu_app_id = (
+                (details.get("user_data") or {}).get("feishu_app_id")
+                or details.get("feishu_app_id")
+            )
+            result = FeishuAppService(self.db).get_service(app_id=feishu_app_id).update_card_message(
                 message_id,
                 self._build_processed_confirmation_card(confirmation, approved, exec_error),
             )
@@ -858,8 +877,8 @@ class UserOperationConfirmationService:
             ],
         }
         try:
-            from app.services.feishu_service import FeishuService
-            FeishuService().send_card_message(receive_id, card, receive_type)
+            from app.services.feishu_app_service import get_feishu_service_for_user
+            get_feishu_service_for_user(self.db, target).send_card_message(receive_id, card, receive_type)
         except Exception:
             import logging
             logging.getLogger(__name__).warning("发送通知给目标用户失败，user_id=%s", user_id)
@@ -898,7 +917,15 @@ class UserOperationConfirmationService:
         api_key_masked: str = "",
     ) -> None:
         """向超级管理员发送账号操作授权飞书卡片"""
-        super_admin = self.get_super_admin()
+        details = confirmation.operation_details or {}
+        feishu_app_id = (
+            (details.get("user_data") or {}).get("feishu_app_id")
+            or details.get("feishu_app_id")
+        )
+        if not feishu_app_id and confirmation.initiator_user_id:
+            initiator = self.db.query(User).filter(User.id == confirmation.initiator_user_id).first()
+            feishu_app_id = getattr(initiator, "feishu_app_id", None)
+        super_admin = self.get_super_admin(feishu_app_id=feishu_app_id)
         if not super_admin:
             return
         receive_id = getattr(super_admin, "feishu_open_id", None) or getattr(super_admin, "feishu_user_id", None)
@@ -906,7 +933,6 @@ class UserOperationConfirmationService:
             return
         receive_type = "open_id" if getattr(super_admin, "feishu_open_id", None) else "user_id"
 
-        details = confirmation.operation_details or {}
         action = details.get("action", "")
         op_type = confirmation.operation_type
 
@@ -1107,8 +1133,8 @@ class UserOperationConfirmationService:
         }
 
         try:
-            from app.services.feishu_service import FeishuService
-            result = FeishuService().send_card_message(receive_id, card, receive_type)
+            from app.services.feishu_app_service import get_feishu_service_for_user
+            result = get_feishu_service_for_user(self.db, super_admin).send_card_message(receive_id, card, receive_type)
             msg_id = result.get("data", {}).get("message_id")
             if msg_id:
                 self.update_feishu_message_id(confirmation.id, msg_id)

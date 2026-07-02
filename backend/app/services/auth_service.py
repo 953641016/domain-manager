@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.services.feishu_service import feishu_service
+from app.services.feishu_app_service import FeishuAppService
 from app.core.security import create_access_token, decode_access_token
 from app.config import Config
 
@@ -20,13 +21,18 @@ class AuthService:
     def __init__(self, db: Session):
         self.db = db
 
-    def get_oauth_url(self, redirect_uri: str) -> str:
+    def get_oauth_url(self, redirect_uri: str, feishu_app_id: Optional[int] = None) -> str:
         """
         获取飞书OAuth授权URL
         """
-        return feishu_service.get_oauth_url(redirect_uri)
+        try:
+            service = FeishuAppService(self.db).get_service(app_id=feishu_app_id) if self.db else feishu_service
+        except Exception:
+            logger.warning("读取飞书应用配置失败，回退到 .env 默认飞书应用", exc_info=True)
+            service = feishu_service
+        return service.get_oauth_url(redirect_uri, state=str(feishu_app_id or ""))
 
-    def login_with_feishu_code(self, code: str) -> Dict[str, Any]:
+    def login_with_feishu_code(self, code: str, feishu_app_id: Optional[int] = None) -> Dict[str, Any]:
         """
         使用飞书OAuth code登录
 
@@ -40,7 +46,15 @@ class AuthService:
             Exception: 登录失败时抛出异常
         """
         # 1. 通过code获取飞书用户信息
-        feishu_user = feishu_service.get_user_info_by_code(code)
+        try:
+            app_svc = FeishuAppService(self.db)
+            app = app_svc.get_app(app_id=feishu_app_id)
+            app_service = app_svc.get_service(app_id=feishu_app_id)
+        except Exception:
+            logger.warning("读取飞书应用配置失败，回退到 .env 默认飞书应用", exc_info=True)
+            app = None
+            app_service = feishu_service
+        feishu_user = app_service.get_user_info_by_code(code)
 
         feishu_user_id = feishu_user.get("user_id") or feishu_user.get("open_id")
         feishu_union_id = feishu_user.get("union_id")
@@ -54,12 +68,18 @@ class AuthService:
         if not feishu_user_id:
             raise Exception("无法获取飞书用户ID")
 
-        logger.info(f"飞书用户登录: name={name}, feishu_user_id={feishu_user_id}, open_id={feishu_open_id}, union_id={feishu_union_id}")
+        logger.info(
+            "飞书用户登录: app=%s name=%s, feishu_user_id=%s, open_id=%s, union_id=%s",
+            app.code if app else "default", name, feishu_user_id, feishu_open_id, feishu_union_id,
+        )
 
         # 2. 查找或创建本地用户
-        user = self.db.query(User).filter(
+        query = self.db.query(User)
+        if app:
+            query = query.filter(User.feishu_app_id == app.id)
+        user = query.filter(
             (User.feishu_user_id == feishu_user_id) |
-            (User.feishu_union_id == feishu_union_id)
+            (User.feishu_open_id == feishu_open_id)
         ).first()
 
         if user:
@@ -77,7 +97,8 @@ class AuthService:
             self.db.refresh(user)
         else:
             # 检查是否是超级管理员
-            is_super_admin = feishu_user_id == Config.SUPER_ADMIN_FEISHU_USER_ID
+            app_super_admin_id = (app.super_admin_feishu_user_id if app else "") or Config.SUPER_ADMIN_FEISHU_USER_ID
+            is_super_admin = feishu_user_id == app_super_admin_id
 
             # 检查是否在管理员列表中
             is_admin = Config.is_admin(feishu_user_id)
@@ -94,6 +115,7 @@ class AuthService:
             user = User(
                 name=name,
                 en_name=en_name,
+                feishu_app_id=app.id if app else None,
                 feishu_user_id=feishu_user_id,
                 feishu_union_id=feishu_union_id,
                 feishu_open_id=feishu_open_id,
@@ -131,6 +153,8 @@ class AuthService:
                 "phone": user.phone,
                 "avatar_url": user.avatar_url,
                 "feishu_user_id": user.feishu_user_id,
+                "feishu_app_id": user.feishu_app_id,
+                "feishu_app_name": user.feishu_app.name if user.feishu_app else None,
                 "is_active": user.is_active,
                 "created_at": user.created_at.isoformat() if user.created_at else None,
             }

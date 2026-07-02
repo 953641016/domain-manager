@@ -14,6 +14,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = Field(None, max_length=50, description="手机号")
     department: Optional[str] = Field(None, max_length=100, description="部门")
     role: str = Field(..., description="用户角色")
+    feishu_app_id: Optional[int] = Field(None, description="归属飞书应用ID")
     remark: Optional[str] = Field(None, max_length=500, description="备注")
 
 
@@ -31,6 +32,7 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     department: Optional[str] = Field(None, max_length=100)
     role: Optional[str] = None
+    feishu_app_id: Optional[int] = Field(None, description="归属飞书应用ID")
     is_active: Optional[bool] = None
     remark: Optional[str] = Field(None, max_length=500)
     assigned_specialist_id: Optional[int] = Field(None, description="归属域名专员ID（业务同事专用）")
@@ -39,6 +41,7 @@ class UserUpdate(BaseModel):
 # 用户响应模式
 class UserResponse(UserBase):
     id: int
+    feishu_app_name: Optional[str] = None
     feishu_userid: str = Field(alias="feishu_user_id")
     feishu_unionid: Optional[str] = Field(None, alias="feishu_union_id")
     feishu_openid: Optional[str] = Field(None, alias="feishu_open_id")

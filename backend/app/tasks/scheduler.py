@@ -202,13 +202,12 @@ class TaskScheduler:
                 )
 
                 # 发送飞书到期提醒
-                from app.services.feishu_service import FeishuService
+                from app.services.feishu_app_service import get_feishu_service_for_user
                 from app.models.user import User
                 from app.config import Config
 
-                feishu = FeishuService()
-
                 # 预查超管，用于无主域名或紧急场景的兜底通知
+                sa = None
                 sa_feishu_id = None
                 sa_feishu_type = "user_id"
                 if Config.SUPER_ADMIN_FEISHU_USER_ID:
@@ -235,6 +234,7 @@ class TaskScheduler:
                             if receive_id:
                                 receive_type = "open_id" if getattr(owner, "feishu_open_id", None) else "user_id"
                                 try:
+                                    feishu = get_feishu_service_for_user(self.db, owner)
                                     feishu.send_domain_alert_card(
                                         receive_id=receive_id,
                                         domain_name=domain.name,
@@ -249,8 +249,9 @@ class TaskScheduler:
                                     logger.warning(f"向专员发送到期提醒失败 ({domain.name}): {notify_err}")
 
                     # 兜底：无主域名或专员无飞书ID时通知超管；紧急（≤7天）时也同步通知超管
-                    if sa_feishu_id and (not notified or expire_days <= 7):
+                    if sa and sa_feishu_id and (not notified or expire_days <= 7):
                         try:
+                            feishu = get_feishu_service_for_user(self.db, sa)
                             feishu.send_domain_alert_card(
                                 receive_id=sa_feishu_id,
                                 domain_name=domain.name,

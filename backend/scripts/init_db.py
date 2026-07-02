@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from app.core.database import engine, Base, SessionLocal
 from app.models.user import User
+from app.models.feishu_app import FeishuApp
 from app.models.permission import ROLE_PERMISSIONS
 from app.config import Config
 from app.models.user_confirmation import UserOperationConfirmation
@@ -40,6 +41,73 @@ def init_db():
     db = SessionLocal()
 
     try:
+        # 初始化默认飞书应用配置
+        print("\n2. 初始化飞书应用配置...")
+        default_feishu_app = None
+        if Config.FEISHU_APP_ID:
+            default_feishu_app = db.query(FeishuApp).filter(FeishuApp.app_id == Config.FEISHU_APP_ID).first()
+            if not default_feishu_app:
+                default_feishu_app = FeishuApp(
+                    code="default",
+                    name="默认飞书应用",
+                    app_id=Config.FEISHU_APP_ID,
+                    verification_token=Config.FEISHU_VERIFICATION_TOKEN,
+                    encrypt_key=Config.FEISHU_ENCRYPT_KEY,
+                    super_admin_feishu_user_id=Config.SUPER_ADMIN_FEISHU_USER_ID,
+                    is_default=True,
+                    is_active=True,
+                )
+                if Config.FEISHU_APP_SECRET:
+                    default_feishu_app.set_app_secret(Config.FEISHU_APP_SECRET)
+                db.add(default_feishu_app)
+                db.commit()
+                db.refresh(default_feishu_app)
+                print(f"   ✓ 已创建默认飞书应用: {default_feishu_app.app_id}")
+            else:
+                default_feishu_app.code = default_feishu_app.code or "default"
+                default_feishu_app.name = default_feishu_app.name or "默认飞书应用"
+                default_feishu_app.verification_token = Config.FEISHU_VERIFICATION_TOKEN
+                default_feishu_app.encrypt_key = Config.FEISHU_ENCRYPT_KEY
+                default_feishu_app.super_admin_feishu_user_id = Config.SUPER_ADMIN_FEISHU_USER_ID
+                default_feishu_app.is_default = True
+                default_feishu_app.is_active = True
+                if Config.FEISHU_APP_SECRET:
+                    default_feishu_app.set_app_secret(Config.FEISHU_APP_SECRET)
+                db.commit()
+                print(f"   - 默认飞书应用已存在并已同步配置: {default_feishu_app.app_id}")
+        else:
+            print("   - 未配置 FEISHU_APP_ID，跳过默认飞书应用创建")
+
+        # 兼容旧库：users 增加 feishu_app_id，并把现有用户归属到默认应用
+        user_cols = [row[1] for row in db.execute(text("PRAGMA table_info(users)")).fetchall()]
+        if "feishu_app_id" not in user_cols:
+            db.execute(text("ALTER TABLE users ADD COLUMN feishu_app_id INTEGER REFERENCES feishu_apps(id)"))
+            db.commit()
+            print("   ✓ users.feishu_app_id 列已添加")
+        if default_feishu_app:
+            db.execute(
+                text("UPDATE users SET feishu_app_id = :app_id WHERE feishu_app_id IS NULL"),
+                {"app_id": default_feishu_app.id},
+            )
+            db.commit()
+            print("   ✓ 现有用户已归属默认飞书应用")
+
+        db.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_users_feishu_app_id ON users(feishu_app_id)"
+        ))
+        try:
+            db.execute(text("DROP INDEX IF EXISTS ix_users_feishu_user_id"))
+            db.commit()
+            print("   ✓ 已清理旧 feishu_user_id 单列索引（如存在）")
+        except Exception as index_err:
+            db.rollback()
+            print(f"   - 旧 feishu_user_id 单列索引未能自动清理: {index_err}")
+        db.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_users_feishu_app_user "
+            "ON users(feishu_app_id, feishu_user_id) WHERE feishu_user_id IS NOT NULL"
+        ))
+        db.commit()
+
         # 检查是否已有超级管理员用户
         existing_super_admin = db.query(User).filter(User.role == "super_admin").first()
 
@@ -49,6 +117,8 @@ def init_db():
             # 如果配置了新的超级管理员ID，更新它
             if Config.SUPER_ADMIN_FEISHU_USER_ID and existing_super_admin.feishu_user_id != Config.SUPER_ADMIN_FEISHU_USER_ID:
                 existing_super_admin.feishu_user_id = Config.SUPER_ADMIN_FEISHU_USER_ID
+                if default_feishu_app:
+                    existing_super_admin.feishu_app_id = default_feishu_app.id
                 db.commit()
                 print(f"   ✓ 已更新超级管理员飞书ID为: {Config.SUPER_ADMIN_FEISHU_USER_ID}")
         else:
@@ -63,6 +133,7 @@ def init_db():
                 name="超级管理员",
                 email="super_admin@company.com",
                 role="super_admin",
+                feishu_app_id=default_feishu_app.id if default_feishu_app else None,
                 feishu_user_id=Config.SUPER_ADMIN_FEISHU_USER_ID or None,
                 permissions=permission_list,
                 is_active=True,
@@ -92,6 +163,7 @@ def init_db():
                 name="系统管理员",
                 email="admin@company.com",
                 role="admin",
+                feishu_app_id=default_feishu_app.id if default_feishu_app else None,
                 feishu_user_id=Config.ADMIN_USER_IDS[0] if Config.ADMIN_USER_IDS else None,
                 permissions=permission_list,
                 is_active=True,

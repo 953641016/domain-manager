@@ -28,6 +28,7 @@ class OAuthUrlResponse(BaseModel):
 class LoginRequest(BaseModel):
     """登录请求"""
     code: str
+    feishu_app_id: Optional[int] = None
 
 
 class LoginResponse(BaseModel):
@@ -48,6 +49,8 @@ class UserInfoResponse(BaseModel):
     phone: Optional[str] = None
     avatar_url: Optional[str] = None
     feishu_user_id: Optional[str] = None
+    feishu_app_id: Optional[int] = None
+    feishu_app_name: Optional[str] = None
     is_active: bool
     created_at: Optional[str] = None
 
@@ -61,6 +64,8 @@ class LogoutResponse(BaseModel):
 @router.get("/oauth-url", response_model=OAuthUrlResponse)
 async def get_oauth_url(
     redirect_uri: str = Query(..., description="回调地址"),
+    feishu_app_id: Optional[int] = Query(None, description="飞书应用ID"),
+    db: Session = Depends(get_db),
 ):
     """
     获取飞书OAuth授权URL
@@ -68,8 +73,8 @@ async def get_oauth_url(
     前端使用此URL生成二维码，用户扫码后会跳转到redirect_uri
     """
     try:
-        auth_service = AuthService(None)
-        oauth_url = auth_service.get_oauth_url(redirect_uri)
+        auth_service = AuthService(db)
+        oauth_url = auth_service.get_oauth_url(redirect_uri, feishu_app_id=feishu_app_id)
         return OAuthUrlResponse(success=True, oauth_url=oauth_url)
     except Exception as e:
         raise HTTPException(
@@ -90,7 +95,7 @@ async def login(
     """
     try:
         auth_service = AuthService(db)
-        result = auth_service.login_with_feishu_code(request.code)
+        result = auth_service.login_with_feishu_code(request.code, feishu_app_id=request.feishu_app_id)
 
         return LoginResponse(
             success=True,
@@ -108,6 +113,7 @@ async def login(
 @router.get("/callback", response_class=HTMLResponse)
 async def auth_callback(
     code: str = Query(..., description="飞书授权码"),
+    state: Optional[str] = Query(None, description="飞书应用ID"),
     db: Session = Depends(get_db),
 ):
     """
@@ -117,7 +123,8 @@ async def auth_callback(
     """
     try:
         auth_service = AuthService(db)
-        result = auth_service.login_with_feishu_code(code)
+        feishu_app_id = int(state) if state and state.isdigit() else None
+        result = auth_service.login_with_feishu_code(code, feishu_app_id=feishu_app_id)
         
         import json
         user_json = json.dumps(result['user'], ensure_ascii=False)
@@ -167,6 +174,8 @@ async def get_current_user_info(
         phone=current_user.phone,
         avatar_url=current_user.avatar_url,
         feishu_user_id=current_user.feishu_user_id,
+        feishu_app_id=current_user.feishu_app_id,
+        feishu_app_name=current_user.feishu_app.name if current_user.feishu_app else None,
         is_active=current_user.is_active,
         created_at=current_user.created_at.isoformat() if current_user.created_at else None,
     )

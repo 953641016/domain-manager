@@ -3,8 +3,8 @@ import { api } from '@/api/client';
 import {
   getUsers, getRoles, createUser, updateUser, deactivateUser, deleteUser, activateUser
 } from '@/api/users';
-import { searchFeishuUsers } from '@/api/feishu';
-import type { FeishuUserInfo } from '@/api/feishu';
+import { getFeishuApps, searchFeishuUsers } from '@/api/feishu';
+import type { FeishuAppInfo, FeishuUserInfo } from '@/api/feishu';
 import { QRCodeSVG } from 'qrcode.react';
 import type { User, RoleInfo, UserCreate, UserUpdate, Specialist } from '@/types/user';
 import { formatDateTime } from '@/utils/datetime';
@@ -13,6 +13,8 @@ const UserManagement: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<RoleInfo[]>([]);
   const [specialists, setSpecialists] = useState<Specialist[]>([]);
+  const [feishuApps, setFeishuApps] = useState<FeishuAppInfo[]>([]);
+  const [selectedFeishuAppId, setSelectedFeishuAppId] = useState<number | null>(null);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -27,6 +29,7 @@ const UserManagement: React.FC = () => {
     search: '',
     role: '',
     is_active: '',
+    feishu_app_id: '',
     skip: 0,
     limit: 20,
   });
@@ -34,6 +37,7 @@ const UserManagement: React.FC = () => {
   const [formData, setFormData] = useState<Partial<UserCreate & UserUpdate>>({
     name: '',
     feishu_user_id: '',
+    feishu_app_id: null,
     role: 'business',
     email: '',
     phone: '',
@@ -44,8 +48,13 @@ const UserManagement: React.FC = () => {
 
   useEffect(() => {
     loadRoles();
+    loadFeishuApps();
     loadSpecialists();
   }, []);
+
+  useEffect(() => {
+    loadSpecialists();
+  }, [selectedFeishuAppId]);
 
   useEffect(() => {
     loadUsers();
@@ -60,9 +69,26 @@ const UserManagement: React.FC = () => {
     }
   };
 
+  const loadFeishuApps = async () => {
+    try {
+      const apps = await getFeishuApps();
+      setFeishuApps(apps);
+      const defaultApp = apps.find((app) => app.is_default) || apps[0];
+      if (defaultApp) {
+        setSelectedFeishuAppId(defaultApp.id);
+        setFilters((prev) => ({ ...prev, feishu_app_id: String(defaultApp.id) }));
+        setFormData((prev) => ({ ...prev, feishu_app_id: defaultApp.id }));
+      }
+    } catch (error) {
+      console.error('加载飞书应用失败:', error);
+    }
+  };
+
   const loadSpecialists = async () => {
     try {
-      const res = await api.get('/users/specialists');
+      const res = await api.get('/users/specialists', {
+        params: { feishu_app_id: selectedFeishuAppId || undefined }
+      });
       setSpecialists(res.data);
     } catch (error) {
       console.error('加载专员列表失败:', error);
@@ -75,6 +101,7 @@ const UserManagement: React.FC = () => {
       const params = {
         ...filters,
         is_active: filters.is_active ? filters.is_active === 'true' : undefined,
+        feishu_app_id: filters.feishu_app_id ? Number(filters.feishu_app_id) : undefined,
       };
       const data = await getUsers(params);
       setUsers(data.items);
@@ -92,6 +119,7 @@ const UserManagement: React.FC = () => {
       setFormData({
         name: user.name,
         feishu_user_id: user.feishu_user_id,
+        feishu_app_id: user.feishu_app_id,
         role: user.role,
         email: user.email || '',
         phone: user.phone || '',
@@ -104,6 +132,7 @@ const UserManagement: React.FC = () => {
       setFormData({
         name: '',
         feishu_user_id: '',
+        feishu_app_id: selectedFeishuAppId,
         role: 'business',
         email: '',
         phone: '',
@@ -120,8 +149,8 @@ const UserManagement: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!formData.name || !formData.feishu_user_id || !formData.role) {
-      alert('请填写必填字段（姓名、飞书用户ID、角色）');
+    if (!formData.name || !formData.feishu_user_id || !formData.role || !formData.feishu_app_id) {
+      alert('请填写必填字段（飞书应用、姓名、飞书用户ID、角色）');
       return;
     }
 
@@ -203,7 +232,7 @@ const UserManagement: React.FC = () => {
     }
     setFeishuSearching(true);
     try {
-      const result = await searchFeishuUsers(keyword);
+      const result = await searchFeishuUsers(keyword, formData.feishu_app_id || selectedFeishuAppId);
       setFeishuSearchResults(result.users || []);
       setShowFeishuDropdown(true);
     } catch (error) {
@@ -227,6 +256,7 @@ const UserManagement: React.FC = () => {
     setFormData({
       ...formData,
       name: user.name,
+      feishu_app_id: formData.feishu_app_id || selectedFeishuAppId,
       feishu_user_id: user.user_id,
       email: user.email || '',
       phone: user.mobile || '',
@@ -241,7 +271,7 @@ const UserManagement: React.FC = () => {
     try {
       const redirectUri = `${window.location.origin}/dm/api/feishu/add-user-callback`;
       const response = await api.get('/feishu/oauth-url', {
-        params: { redirect_uri: redirectUri }
+        params: { redirect_uri: redirectUri, feishu_app_id: selectedFeishuAppId }
       });
       setQrUrl(response.data.oauth_url);
       setShowQRModal(true);
@@ -267,6 +297,22 @@ const UserManagement: React.FC = () => {
       <div className="flex justify-between items-center mb-4 md:mb-6">
         <h1 className="text-xl md:text-2xl font-bold text-gray-900">用户管理</h1>
         <div className="flex gap-2">
+          {feishuApps.length > 0 && (
+            <select
+              value={selectedFeishuAppId || ''}
+              onChange={(event) => {
+                const appId = Number(event.target.value);
+                setSelectedFeishuAppId(appId);
+                setFilters({ ...filters, feishu_app_id: String(appId), skip: 0 });
+                setFormData({ ...formData, feishu_app_id: appId });
+              }}
+              className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
+            >
+              {feishuApps.map((app) => (
+                <option key={app.id} value={app.id}>{app.name}</option>
+              ))}
+            </select>
+          )}
           <button
             onClick={openQRModal}
             className="bg-green-600 hover:bg-green-700 text-white px-3 py-2 md:px-4 rounded-lg font-medium text-sm md:text-base"
@@ -366,7 +412,8 @@ const UserManagement: React.FC = () => {
                       </span>
                     </td>
                     <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {user.feishu_user_id}
+                      <div>{user.feishu_user_id}</div>
+                      <div className="text-xs text-gray-400">{user.feishu_app_name || '-'}</div>
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -422,6 +469,28 @@ const UserManagement: React.FC = () => {
             </div>
             <div className="p-4 md:p-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    飞书应用 <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={formData.feishu_app_id || ''}
+                    onChange={(e) => {
+                      const appId = Number(e.target.value);
+                      setFormData({ ...formData, feishu_app_id: appId, feishu_user_id: '' });
+                      setSelectedFeishuAppId(appId);
+                      setFeishuSearchKeyword('');
+                      setFeishuSearchResults([]);
+                    }}
+                    disabled={!!editingUser}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 disabled:bg-gray-100"
+                  >
+                    <option value="">请选择飞书应用</option>
+                    {feishuApps.map((app) => (
+                      <option key={app.id} value={app.id}>{app.name}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     姓名 <span className="text-red-500">*</span>

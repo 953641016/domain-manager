@@ -11,6 +11,8 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 from app.config import Config
 from app.services.feishu_service import feishu_service
+from app.services.feishu_app_service import FeishuAppService
+from app.services.feishu_app_service import get_feishu_service_for_user
 from app.bots.feishu import feishu_bot
 from app.core.database import get_db, SessionLocal
 
@@ -32,6 +34,15 @@ def _start_card_background_task(name: str, target, *args) -> None:
             logging.getLogger(__name__).exception("飞书卡片后台任务失败: %s", name)
 
     threading.Thread(target=runner, name=name, daemon=True).start()
+
+
+def _feishu_service_for_user_object(user):
+    """在无请求 db 参数的通知函数中，按用户归属飞书应用获取服务实例。"""
+    db = SessionLocal()
+    try:
+        return FeishuAppService(db).get_service(app_id=getattr(user, "feishu_app_id", None))
+    finally:
+        db.close()
 
 
 def _start_async_card_background_task(name: str, coro_func, *args) -> None:
@@ -100,16 +111,40 @@ class FeishuUserInfo(BaseModel):
     department_name: Optional[str] = None
 
 
+@router.get("/apps")
+async def list_feishu_apps(db: Session = Depends(get_db)):
+    """列出可用飞书应用（公开字段，用于登录和扫码添加选择主体）。"""
+    try:
+        apps = FeishuAppService(db).get_active_apps()
+        return {"success": True, "apps": [app.to_public_dict() for app in apps]}
+    except Exception:
+        logger.warning("读取飞书应用列表失败，回退到 .env 默认应用", exc_info=True)
+        fallback = []
+        if Config.FEISHU_APP_ID:
+            fallback.append({
+                "id": None,
+                "code": "default",
+                "name": "默认飞书应用",
+                "app_id": Config.FEISHU_APP_ID,
+                "is_default": True,
+                "is_active": True,
+            })
+        return {"success": True, "apps": fallback}
+
+
 @router.get("/oauth-url")
 async def get_feishu_oauth_url(
-    redirect_uri: str = Query(..., description="回调地址")
+    redirect_uri: str = Query(..., description="回调地址"),
+    feishu_app_id: Optional[int] = Query(None, description="飞书应用ID"),
+    db: Session = Depends(get_db),
 ):
     """
     获取飞书OAuth授权URL
     前端用这个URL生成二维码，用户扫码后会跳转到redirect_uri
     """
     try:
-        oauth_url = feishu_service.get_oauth_url(redirect_uri)
+        service = FeishuAppService(db).get_service(app_id=feishu_app_id)
+        oauth_url = service.get_oauth_url(redirect_uri, state=str(feishu_app_id or ""))
         return {
             "success": True,
             "oauth_url": oauth_url
@@ -120,14 +155,17 @@ async def get_feishu_oauth_url(
 
 @router.get("/user-info", response_model=FeishuUserInfo)
 async def get_feishu_user_info(
-    code: str = Query(..., description="OAuth授权码")
+    code: str = Query(..., description="OAuth授权码"),
+    feishu_app_id: Optional[int] = Query(None, description="飞书应用ID"),
+    db: Session = Depends(get_db),
 ):
     """
     通过OAuth code获取用户信息
     用户扫码后，前端拿到code，调用此接口获取用户详情
     """
     try:
-        user_data = feishu_service.get_user_info_by_code(code)
+        service = FeishuAppService(db).get_service(app_id=feishu_app_id)
+        user_data = service.get_user_info_by_code(code)
         
         # 格式化返回数据
         return FeishuUserInfo(
@@ -147,14 +185,17 @@ async def get_feishu_user_info(
 
 @router.get("/search-users")
 async def search_feishu_users(
-    keyword: str = Query(..., min_length=1, description="搜索关键词（姓名）")
+    keyword: str = Query(..., min_length=1, description="搜索关键词（姓名）"),
+    feishu_app_id: Optional[int] = Query(None, description="飞书应用ID"),
+    db: Session = Depends(get_db),
 ):
     """
     按姓名搜索飞书用户
     用于新增用户时快速查找飞书用户ID
     """
     try:
-        users = feishu_service.search_users_by_name(keyword)
+        service = FeishuAppService(db).get_service(app_id=feishu_app_id)
+        users = service.search_users_by_name(keyword)
         return {
             "success": True,
             "users": users
@@ -188,7 +229,8 @@ async def get_user_by_id(
 
 
 @router.post("/webhook")
-async def feishu_webhook(request: Request):
+@router.post("/apps/{app_code}/webhook")
+async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: Session = Depends(get_db)):
     """
     飞书事件回调处理接口
     处理URL验证、消息接收、卡片按钮回调等事件
@@ -198,6 +240,10 @@ async def feishu_webhook(request: Request):
     try:
         # 解析请求体
         request_body = await request.json()
+        app = FeishuAppService(db).get_app(app_code=app_code) if app_code else None
+        current_feishu_service = FeishuAppService(db).get_service(app_code=app_code) if app_code else feishu_service
+        if app:
+            request_body["_feishu_app_id"] = app.id
 
         _log.info("feishu webhook body keys=%s type=%s",
                   list(request_body.keys()),
@@ -208,13 +254,13 @@ async def feishu_webhook(request: Request):
             request_body.get("token")
             or request_body.get("header", {}).get("token")
         )
-        if not feishu_service.verify_webhook_signature_token(token_in_body):
+        if not current_feishu_service.verify_webhook_signature_token(token_in_body):
             _log.warning("feishu webhook 签名验证失败 token=%s", token_in_body)
             raise HTTPException(status_code=403, detail="签名验证失败")
 
         # 处理URL验证请求
         if request_body.get("type") == "url_verification":
-            return feishu_service.handle_url_verification(request_body)
+            return current_feishu_service.handle_url_verification(request_body)
 
         # 处理其他事件
         event_type = request_body.get("header", {}).get("event_type")
@@ -579,7 +625,7 @@ def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[A
     receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
     if not receive_id:
         raise HTTPException(status_code=400, detail="归属域名专员未配置飞书 ID，无法发送审批卡片")
-    result = feishu_service.send_card_message(receive_id, card, receive_type)
+    result = get_feishu_service_for_user(db, specialist).send_card_message(receive_id, card, receive_type)
     if result.get("code") != 0:
         raise HTTPException(status_code=502, detail=f"发送审批卡片失败: {result}")
     msg_id = (result.get("data") or {}).get("message_id")
@@ -587,11 +633,11 @@ def _send_doc_request_approval_card(req, applicant, specialist, accounts: List[A
         req.feishu_message_id = msg_id
         db.commit()
         db.refresh(req)
-    _send_request_submitted_card(req, applicant, specialist)
+    _send_request_submitted_card(req, applicant, specialist, db)
     return result
 
 
-def _send_request_submitted_card(req, applicant, reviewer=None) -> None:
+def _send_request_submitted_card(req, applicant, reviewer=None, db: Optional[Session] = None) -> None:
     """给申请人发送只读申请卡片：无按钮、不保存 message_id、不影响主流程。"""
     receive_id = getattr(applicant, "feishu_open_id", None) or getattr(applicant, "feishu_user_id", None)
     if not receive_id:
@@ -599,7 +645,8 @@ def _send_request_submitted_card(req, applicant, reviewer=None) -> None:
     receive_type = "open_id" if getattr(applicant, "feishu_open_id", None) else "user_id"
     card = _build_request_submitted_card(req, applicant, reviewer)
     try:
-        feishu_service.send_card_message(receive_id, card, receive_type)
+        service = get_feishu_service_for_user(db, applicant) if db else feishu_service
+        service.send_card_message(receive_id, card, receive_type)
     except Exception:
         logger.warning("发送申请人只读申请卡片失败: request_id=%s", getattr(req, "id", ""), exc_info=True)
 
@@ -1267,6 +1314,7 @@ def _html_page(
 @router.get("/add-user-callback")
 async def add_user_callback(
     code: str = Query(..., description="飞书授权码"),
+    state: Optional[str] = Query(None, description="飞书应用ID"),
     db: Session = Depends(get_db),
 ):
     """
@@ -1278,7 +1326,12 @@ async def add_user_callback(
         from app.services.user_confirmation_service import UserOperationConfirmationService
         from app.models.user_confirmation import ConfirmationOperationType
 
-        user_info = feishu_service.get_user_info_by_code(code)
+        feishu_app_id = int(state) if state and state.isdigit() else None
+        app_svc = FeishuAppService(db)
+        feishu_app = app_svc.get_app(app_id=feishu_app_id)
+        scoped_feishu_service = app_svc.get_service(app_id=feishu_app_id)
+
+        user_info = scoped_feishu_service.get_user_info_by_code(code)
         if not user_info:
             raise HTTPException(status_code=400, detail="获取用户信息失败")
 
@@ -1287,7 +1340,7 @@ async def add_user_callback(
         if not feishu_user_id:
             raise HTTPException(status_code=400, detail="未获取到用户ID")
 
-        existing_user = user_service.get_user_by_feishu_userid(feishu_user_id)
+        existing_user = user_service.get_user_by_feishu_userid(feishu_user_id, feishu_app_id=feishu_app.id if feishu_app else None)
         if existing_user:
             return HTMLResponse(content=_html_page(
                 title="已在系统中",
@@ -1305,6 +1358,7 @@ async def add_user_callback(
             from app.schemas.user import UserCreate
             user_create = UserCreate(
                 name=user_info.get("name", "未知用户"),
+                feishu_app_id=feishu_app.id if feishu_app else None,
                 feishu_user_id=feishu_user_id,
                 feishu_union_id=user_info.get("union_id"),
                 feishu_open_id=user_info.get("open_id"),
@@ -1347,6 +1401,8 @@ async def add_user_callback(
             target_user_data={
                 "name": user_info.get("name"),
                 "feishu_userid": feishu_user_id,
+                "feishu_app_id": feishu_app.id if feishu_app else None,
+                "feishu_app_name": feishu_app.name if feishu_app else None,
             },
             operation_details={
                 "action": "create_user",
@@ -1354,6 +1410,7 @@ async def add_user_callback(
                 "user_data": {
                     "name": user_info.get("name", "未知用户"),
                     "role": "business",
+                    "feishu_app_id": feishu_app.id if feishu_app else None,
                     "feishu_user_id": feishu_user_id,
                     "feishu_union_id": user_info.get("union_id"),
                     "feishu_open_id": user_info.get("open_id"),
@@ -1604,7 +1661,7 @@ def submit_request(
                     db.commit()
                     db.refresh(req)
             else:
-                feishu_service.send_text_message(
+                get_feishu_service_for_user(db, specialist).send_text_message(
                     receive_id=receive_id,
                     content=(
                         f"📋 域名注册申请\n"
@@ -1615,7 +1672,7 @@ def submit_request(
                     ),
                     receive_id_type=receive_type,
                 )
-        _send_request_submitted_card(req, current_user, specialist)
+        _send_request_submitted_card(req, current_user, specialist, db)
 
     return {"success": True, "request_id": req.id}
 
@@ -1708,7 +1765,7 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
                 req.feishu_message_id = msg_id
                 db.commit()
                 db.refresh(req)
-        _send_request_submitted_card(req, user, specialist)
+        _send_request_submitted_card(req, user, specialist, db)
 
     return {"success": True, "request_id": req.id, "records_count": len(records)}
 
@@ -1722,6 +1779,8 @@ async def _handle_card_action(body: dict) -> dict:
         action = _extract_card_action(body)
         value = _normalize_card_action_value(action.get("value", {}))
         operator = _extract_card_operator(body)
+        if body.get("_feishu_app_id"):
+            operator["feishu_app_id"] = body.get("_feishu_app_id")
 
         card_action = value.get("action", "")
         if not card_action:
@@ -1759,6 +1818,7 @@ async def _handle_card_action(body: dict) -> dict:
             confirmation_id,
             card_action,
             operator_open_id,
+            operator.get("feishu_app_id"),
             _as_text(form_values.get("reject_reason")) or "未填写",
         )
         if card_action == "approve_account_op":
@@ -1933,13 +1993,14 @@ async def _handle_bot_menu_event(body: dict) -> dict:
         from app.services.audit_service import AuditService
 
         user_svc = UserService(db)
+        feishu_app_id = body.get("_feishu_app_id")
         operator = (
-            user_svc.get_user_by_any_feishu_id(context.get("open_id") or "")
-            or user_svc.get_user_by_any_feishu_id(context.get("user_id") or "")
+            user_svc.get_user_by_any_feishu_id(context.get("open_id") or "", feishu_app_id=feishu_app_id)
+            or user_svc.get_user_by_any_feishu_id(context.get("user_id") or "", feishu_app_id=feishu_app_id)
         )
         if not operator or not operator.is_active or operator.role not in ("domain_spec", "super_admin"):
             card = _build_permission_denied_card(getattr(operator, "name", "") if operator else "未绑定用户")
-            feishu_service.send_card_message(receive_id, card, receive_type)
+            (get_feishu_service_for_user(db, operator) if operator else feishu_service).send_card_message(receive_id, card, receive_type)
             return {"success": True, "message": "已发送无权限提示"}
 
         accounts = _get_reviewable_reg_accounts(db, operator)
@@ -1960,10 +2021,10 @@ async def _handle_bot_menu_event(body: dict) -> dict:
                     }
                 ],
             }
-            feishu_service.send_card_message(receive_id, card, receive_type)
+            get_feishu_service_for_user(db, operator).send_card_message(receive_id, card, receive_type)
             return {"success": True, "message": "已发送账号缺失提示"}
 
-        result = feishu_service.send_card_message(
+        result = get_feishu_service_for_user(db, operator).send_card_message(
             receive_id,
             _build_direct_register_form_card(operator, accounts),
             receive_type,
@@ -2064,7 +2125,7 @@ async def _process_direct_domain_register_action(value: dict, form_values: Dict[
         req_svc = RequestService(db)
         audit_svc = AuditService(db)
 
-        specialist = user_svc.get_user_by_any_feishu_id(operator_feishu_id)
+        specialist = user_svc.get_user_by_any_feishu_id(operator_feishu_id, feishu_app_id=operator.get("feishu_app_id"))
         if not specialist or not specialist.is_active or specialist.role not in ("domain_spec", "super_admin"):
             return {"toast": {"type": "error", "content": "只有域名专员或超级管理员可以自主注册域名"}}
         if _is_direct_register_form_expired(value):
@@ -2151,6 +2212,7 @@ def _process_confirmation_in_background(
     confirmation_id: int,
     card_action: str,
     approver_feishu_userid: str,
+    feishu_app_id: Optional[int] = None,
     reject_reason: str = "",
 ) -> None:
     """超管确认涉及写库和通知，放到后台避免飞书卡片 200341 超时。"""
@@ -2160,7 +2222,7 @@ def _process_confirmation_in_background(
             from app.services.user_confirmation_service import UserOperationConfirmationService
 
             conf_svc = UserOperationConfirmationService(db)
-            approver = conf_svc.get_user_by_feishu_id(approver_feishu_userid)
+            approver = conf_svc.get_user_by_feishu_id(approver_feishu_userid, feishu_app_id=feishu_app_id)
             if not approver or approver.role != "super_admin":
                 logging.getLogger(__name__).warning(
                     "超管确认后台处理拒绝：操作者无权限 confirmation_id=%s operator=%s",
@@ -2228,7 +2290,7 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
         user_svc = UserService(db)
         req_svc = RequestService(db)
 
-        reviewer = user_svc.get_user_by_any_feishu_id(operator_open_id)
+        reviewer = user_svc.get_user_by_any_feishu_id(operator_open_id, feishu_app_id=operator.get("feishu_app_id"))
         if not reviewer or reviewer.role not in ("domain_spec", "super_admin"):
             return {"toast": {"type": "error", "content": "只有域名专员可以审批此申请"}}
 
@@ -2341,7 +2403,7 @@ def _notify_request_rejected(req, applicant, reviewer, reason: str) -> None:
             continue
         receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
         try:
-            feishu_service.send_card_message(receive_id, {
+            _feishu_service_for_user_object(user).send_card_message(receive_id, {
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "title": {"tag": "plain_text", "content": title},
@@ -2377,7 +2439,7 @@ def _notify_doc_request_action_failed(req, applicant, reviewer, reason: str) -> 
             continue
         receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
         try:
-            feishu_service.send_card_message(receive_id, {
+            _feishu_service_for_user_object(user).send_card_message(receive_id, {
                 "config": {"wide_screen_mode": True},
                 "header": {
                     "title": {"tag": "plain_text", "content": f"⚠️ {label}审批未执行"},
@@ -2525,7 +2587,7 @@ async def _process_dns_card_action(card_action: str, value: dict, operator: dict
         req_svc  = RequestService(db)
 
         # 找操作人（open_id / user_id 均可）
-        specialist = user_svc.get_user_by_any_feishu_id(operator_open_id)
+        specialist = user_svc.get_user_by_any_feishu_id(operator_open_id, feishu_app_id=operator.get("feishu_app_id"))
         if not specialist or specialist.role not in ("domain_spec", "super_admin"):
             return {"toast": {"type": "error", "content": "只有域名专员可以审批此申请"}}
 

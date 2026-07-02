@@ -15,6 +15,8 @@ export interface User {
   email: string | null;
   phone: string | null;
   department: string | null;
+  feishu_app_id: number | null;
+  feishu_app_name?: string | null;
   feishu_user_id: string;
   feishu_union_id: string | null;
   feishu_open_id: string | null;
@@ -49,6 +51,7 @@ export interface UserCreate {
   phone?: string;
   department?: string;
   role: string;
+  feishu_app_id?: number | null;
   remark?: string;
 }
 
@@ -58,6 +61,7 @@ export interface UserUpdate {
   phone?: string;
   department?: string;
   role?: string;
+  feishu_app_id?: number | null;
   is_active?: boolean;
   remark?: string;
   assigned_specialist_id?: number | null;
@@ -66,4 +70,5 @@ export interface UserUpdate {
 export interface Specialist {
   id: number;
   name: string;
+  feishu_app_id?: number | null;
 }

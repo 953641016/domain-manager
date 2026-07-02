@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '@/api/client';
+import { getFeishuApps, type FeishuAppInfo } from '@/api/feishu';
 
 interface UserInfo {
   id: number;
@@ -21,6 +22,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [oauthUrl, setOauthUrl] = useState('');
+  const [feishuApps, setFeishuApps] = useState<FeishuAppInfo[]>([]);
+  const [selectedFeishuAppId, setSelectedFeishuAppId] = useState<number | null>(null);
 
   useEffect(() => {
     // 保存登录后的跳转目标（供 callback 页面读取）
@@ -38,15 +41,39 @@ export default function LoginPage() {
       return;
     }
 
-    // 获取OAuth URL
-    fetchOAuthUrl();
+    loadFeishuApps();
   }, [navigate, searchParams]);
 
-  const fetchOAuthUrl = async () => {
+  useEffect(() => {
+    if (selectedFeishuAppId) {
+      fetchOAuthUrl(selectedFeishuAppId);
+    }
+  }, [selectedFeishuAppId]);
+
+  const loadFeishuApps = async () => {
+    try {
+      const apps = await getFeishuApps();
+      setFeishuApps(apps);
+      const defaultApp = apps.find((app) => app.is_default) || apps[0];
+      if (defaultApp) {
+        setSelectedFeishuAppId(defaultApp.id);
+        if (!defaultApp.id) {
+          fetchOAuthUrl(null);
+        }
+      } else {
+        fetchOAuthUrl(null);
+      }
+    } catch (err) {
+      console.error('获取飞书应用失败:', err);
+      setError('获取飞书应用失败，请稍后重试');
+    }
+  };
+
+  const fetchOAuthUrl = async (feishuAppId: number | null) => {
     try {
       const redirectUri = `${window.location.origin}/dm/api/auth/callback`;
       const response = await api.get('/auth/oauth-url', {
-        params: { redirect_uri: redirectUri }
+        params: { redirect_uri: redirectUri, feishu_app_id: feishuAppId || undefined }
       });
       setOauthUrl(response.data.oauth_url);
     } catch (err) {
@@ -96,6 +123,20 @@ export default function LoginPage() {
               <p className="text-gray-500">
                 请使用飞书账号登录
               </p>
+
+              {feishuApps.length > 1 && (
+                <select
+                  value={selectedFeishuAppId || ''}
+                  onChange={(event) => setSelectedFeishuAppId(Number(event.target.value))}
+                  className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+                >
+                  {feishuApps.map((app) => (
+                    <option key={app.id} value={app.id}>
+                      {app.name}
+                    </option>
+                  ))}
+                </select>
+              )}
 
               {error && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">

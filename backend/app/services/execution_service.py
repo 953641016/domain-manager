@@ -17,9 +17,11 @@ from sqlalchemy.orm import Session
 from app.core.database import SessionLocal
 from app.models.request import Request
 from app.models.domain import Domain
+from app.models.user import User
 from app.services.domain_service import DomainService
 from app.services.audit_service import AuditService
 from app.services.feishu_service import FeishuService
+from app.services.feishu_app_service import get_feishu_service_for_user, FeishuAppService
 from app.adapters.registrar_factory import RegistrarFactory
 from app.config import Config
 
@@ -38,7 +40,6 @@ class ExecutionService:
         self.db = db
         self.domain_service = DomainService(db)
         self.audit_service = AuditService(db)
-        self.feishu = FeishuService()
 
     # ==================== 对外主入口 ====================
 
@@ -694,7 +695,7 @@ class ExecutionService:
             ],
         }
         try:
-            self.feishu.send_card_message(receive_id, card, receive_type)
+            get_feishu_service_for_user(self.db, user).send_card_message(receive_id, card, receive_type)
         except Exception:
             logger.exception("发送飞书卡片通知失败")
 
@@ -727,7 +728,9 @@ class ExecutionService:
             ],
         }
         try:
-            update_result = self.feishu.update_card_message(message_id, card)
+            reviewer = self.db.query(User).filter(User.id == request.approver_id).first() if getattr(request, "approver_id", None) else None
+            app_id = getattr(reviewer, "feishu_app_id", None)
+            update_result = FeishuAppService(self.db).get_service(app_id=app_id).update_card_message(message_id, card)
             if update_result.get("code") != 0:
                 logger.warning(
                     "更新原业务审批卡片失败: request_id=%s result=%s",
@@ -761,7 +764,7 @@ class ExecutionService:
             logger.info("用户 %s 无飞书ID，跳过通知", getattr(user, "name", "?"))
             return
         try:
-            self.feishu.send_text_message(receive_id, content, receive_type)
+            get_feishu_service_for_user(self.db, user).send_text_message(receive_id, content, receive_type)
         except Exception:
             logger.exception("发送飞书通知失败")
 

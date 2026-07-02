@@ -16,15 +16,29 @@ export interface FeishuUserInfo {
   department_name?: string;
 }
 
+export interface FeishuAppInfo {
+  id: number | null;
+  code: string;
+  name: string;
+  app_id: string;
+  is_default: boolean;
+  is_active: boolean;
+}
+
+export async function getFeishuApps(): Promise<FeishuAppInfo[]> {
+  const response = await api.get('/feishu/apps');
+  return response.data.apps || [];
+}
+
 /**
  * 获取飞书 OAuth URL
  */
-export async function getFeishuOAuthUrl(redirect_uri: string): Promise<{
+export async function getFeishuOAuthUrl(redirect_uri: string, feishu_app_id?: number | null): Promise<{
   success: boolean;
   oauth_url: string;
 }> {
   const response = await api.get('/feishu/oauth-url', {
-    params: { redirect_uri }
+    params: { redirect_uri, feishu_app_id }
   });
   return response.data;
 }
@@ -32,9 +46,9 @@ export async function getFeishuOAuthUrl(redirect_uri: string): Promise<{
 /**
  * 通过 code 获取飞书用户信息
  */
-export async function getFeishuUserInfo(code: string): Promise<FeishuUserInfo> {
+export async function getFeishuUserInfo(code: string, feishu_app_id?: number | null): Promise<FeishuUserInfo> {
   const response = await api.get<FeishuUserInfo>('/feishu/user-info', {
-    params: { code }
+    params: { code, feishu_app_id }
   });
   return response.data;
 }
@@ -91,12 +105,12 @@ export async function sendFeishuCard(
 /**
  * 按姓名搜索飞书用户
  */
-export async function searchFeishuUsers(keyword: string): Promise<{
+export async function searchFeishuUsers(keyword: string, feishu_app_id?: number | null): Promise<{
   success: boolean;
   users: FeishuUserInfo[];
 }> {
   const response = await api.get('/feishu/search-users', {
-    params: { keyword }
+    params: { keyword, feishu_app_id }
   });
   return response.data;
 }

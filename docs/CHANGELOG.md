@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **多飞书应用支持**（`backend/app/models/feishu_app.py`、`backend/app/api/v1/feishu.py`、`frontend/src/pages/Login.tsx`、`frontend/src/pages/config/UserManagement.tsx`）：新增飞书应用配置表和管理脚本，用户按飞书应用归属；登录、扫码添加人员、用户搜索、飞书回调和通知发送均支持选择对应飞书应用，兼容原默认应用。
 - **GSC 认证值直传参数**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：飞书文档按钮 `gsc_dns` 支持可选 `gsc_verification` 参数；传入 `google-site-verification=...` 时直接生成根域 TXT 认证记录，为空或不传时继续从飞书文档解析。
 - **注册成功后自动发起后端解析申请**（`backend/app/services/execution_service.py`）：域名注册最终成功后自动创建 `backend_dns` 待审批申请，默认生成 `svc` A 记录到 `BACKEND_DNS_DEFAULT_TARGET`，并发送给同一域名专员审批；若同域名已有待处理/已完成后端解析申请则不重复创建。
 - **域名购买直传域名参数**（`backend/app/api/v1/feishu.py`、`docs/feishu-doc-integration.md`）：飞书文档按钮 `domain_purchase` 支持可选 `register_domain` 参数；传入时以该域名作为注册目标，不再从文档正文解析域名，为空则保持原文档解析流程，DNS 解析类按钮不使用该参数。

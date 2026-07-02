@@ -60,13 +60,14 @@ def get_users(
     role: Optional[str] = Query(None),
     is_active: Optional[bool] = Query(None),
     search: Optional[str] = Query(None),
+    feishu_app_id: Optional[int] = Query(None),
     current_user: User = Depends(require_view_users),
     db: Session = Depends(get_db),
 ):
     """获取用户列表（admin/super_admin 可见）"""
     service = UserService(db)
-    users = service.get_users(skip=skip, limit=limit, role=role, is_active=is_active, search=search)
-    total = service.get_users_count(role=role, is_active=is_active, search=search)
+    users = service.get_users(skip=skip, limit=limit, role=role, is_active=is_active, search=search, feishu_app_id=feishu_app_id)
+    total = service.get_users_count(role=role, is_active=is_active, search=search, feishu_app_id=feishu_app_id)
     return UserListResponse(total=total, items=users)
 
 
@@ -84,13 +85,14 @@ def get_current_user_info(current_user: User = Depends(get_current_active_user))
 
 @router.get("/specialists", response_model=list)
 def get_specialists(
+    feishu_app_id: Optional[int] = Query(None),
     current_user: User = Depends(require_view_users),
     db: Session = Depends(get_db),
 ):
     """获取域名专员列表（用于设置归属专员下拉）"""
     service = UserService(db)
-    specs = service.get_users(role="domain_spec", is_active=True, limit=500)
-    return [{"id": u.id, "name": u.name} for u in specs]
+    specs = service.get_users(role="domain_spec", is_active=True, limit=500, feishu_app_id=feishu_app_id)
+    return [{"id": u.id, "name": u.name, "feishu_app_id": u.feishu_app_id} for u in specs]
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -129,6 +131,7 @@ def create_user(
             "user_data": {
                 "name": user_in.name,
                 "role": user_in.role,
+                "feishu_app_id": getattr(user_in, "feishu_app_id", None),
                 "feishu_user_id": getattr(user_in, "feishu_userid", None) or getattr(user_in, "feishu_user_id", None),
                 "email": getattr(user_in, "email", None),
                 "department": getattr(user_in, "department", None),

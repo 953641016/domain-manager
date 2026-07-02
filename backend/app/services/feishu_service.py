@@ -12,16 +12,35 @@ from app.config import Config
 class FeishuService:
     """飞书服务类"""
     
-    def __init__(self):
-        self.app_id = Config.FEISHU_APP_ID
-        self.app_secret = Config.FEISHU_APP_SECRET
-        self.verification_token = Config.FEISHU_VERIFICATION_TOKEN
-        self.encrypt_key = Config.FEISHU_ENCRYPT_KEY
+    def __init__(
+        self,
+        app_id: Optional[str] = None,
+        app_secret: Optional[str] = None,
+        verification_token: Optional[str] = None,
+        encrypt_key: Optional[str] = None,
+        app_code: Optional[str] = None,
+    ):
+        self.app_id = app_id if app_id is not None else Config.FEISHU_APP_ID
+        self.app_secret = app_secret if app_secret is not None else Config.FEISHU_APP_SECRET
+        self.verification_token = verification_token if verification_token is not None else Config.FEISHU_VERIFICATION_TOKEN
+        self.encrypt_key = encrypt_key if encrypt_key is not None else Config.FEISHU_ENCRYPT_KEY
+        self.app_code = app_code or "default"
         self.base_url = "https://open.feishu.cn"
         
         # 缓存token
         self._app_access_token: Optional[str] = None
         self._token_expires_at: Optional[datetime] = None
+
+    @classmethod
+    def from_feishu_app(cls, app) -> "FeishuService":
+        """根据 FeishuApp 模型创建服务实例。"""
+        return cls(
+            app_id=app.app_id,
+            app_secret=app.get_app_secret(),
+            verification_token=app.verification_token or "",
+            encrypt_key=app.encrypt_key or "",
+            app_code=app.code,
+        )
     
     def get_app_access_token(self) -> str:
         """
@@ -35,6 +54,8 @@ class FeishuService:
             return self._app_access_token
         
         # 请求新token
+        if not self.app_id or not self.app_secret:
+            raise Exception("飞书应用 App ID 或 App Secret 未配置")
         url = f"{self.base_url}/open-apis/auth/v3/app_access_token/internal"
         payload = {
             "app_id": self.app_id,
@@ -176,7 +197,7 @@ class FeishuService:
         result = []
         for u in users:
             result.append({
-                "user_id": u.get("open_id", ""),
+                "user_id": u.get("user_id") or u.get("open_id", ""),
                 "name": u.get("name", ""),
                 "en_name": u.get("en_name", ""),
                 "email": u.get("email", ""),
