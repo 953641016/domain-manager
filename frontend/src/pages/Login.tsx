@@ -20,6 +20,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState('');
   const [oauthUrl, setOauthUrl] = useState('');
   const [feishuApps, setFeishuApps] = useState<FeishuAppInfo[]>([]);
@@ -70,6 +71,9 @@ export default function LoginPage() {
   };
 
   const fetchOAuthUrl = async (feishuAppId: number | null) => {
+    setOauthLoading(true);
+    setOauthUrl('');
+    setError('');
     try {
       const redirectUri = `${window.location.origin}/dm/api/auth/callback`;
       const response = await api.get('/auth/oauth-url', {
@@ -79,10 +83,16 @@ export default function LoginPage() {
     } catch (err) {
       console.error('获取OAuth URL失败:', err);
       setError('获取登录链接失败，请稍后重试');
+    } finally {
+      setOauthLoading(false);
     }
   };
 
   const handleLogin = () => {
+    if (oauthLoading) {
+      setError('正在切换飞书应用，请稍后再登录');
+      return;
+    }
     if (!oauthUrl) {
       setError('获取登录链接失败');
       return;
@@ -127,7 +137,10 @@ export default function LoginPage() {
               {feishuApps.length > 1 && (
                 <select
                   value={selectedFeishuAppId || ''}
-                  onChange={(event) => setSelectedFeishuAppId(Number(event.target.value))}
+                  onChange={(event) => {
+                    setOauthUrl('');
+                    setSelectedFeishuAppId(Number(event.target.value));
+                  }}
                   className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
                 >
                   {feishuApps.map((app) => (
@@ -146,16 +159,16 @@ export default function LoginPage() {
 
               <button
                 onClick={handleLogin}
-                disabled={loading}
+                disabled={loading || oauthLoading || !oauthUrl}
                 className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {loading ? (
+                {loading || oauthLoading ? (
                   <span className="flex items-center">
                     <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    登录中...
+                    {oauthLoading ? '正在准备登录...' : '登录中...'}
                   </span>
                 ) : (
                   '飞书扫码登录'
