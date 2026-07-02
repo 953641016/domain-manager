@@ -267,16 +267,32 @@ const UserManagement: React.FC = () => {
     setShowFeishuDropdown(false);
   };
 
+  const fetchQRUrl = async (feishuAppId: number | null) => {
+    const redirectUri = `${window.location.origin}/dm/api/feishu/add-user-callback`;
+    const response = await api.get('/feishu/oauth-url', {
+      params: { redirect_uri: redirectUri, feishu_app_id: feishuAppId || undefined }
+    });
+    setQrUrl(response.data.oauth_url);
+  };
+
   const openQRModal = async () => {
     try {
-      const redirectUri = `${window.location.origin}/dm/api/feishu/add-user-callback`;
-      const response = await api.get('/feishu/oauth-url', {
-        params: { redirect_uri: redirectUri, feishu_app_id: selectedFeishuAppId }
-      });
-      setQrUrl(response.data.oauth_url);
+      await fetchQRUrl(selectedFeishuAppId);
       setShowQRModal(true);
     } catch (error) {
       alert('获取二维码失败，请稍后重试');
+    }
+  };
+
+  const handleQRAppChange = async (appId: number) => {
+    setSelectedFeishuAppId(appId);
+    setFilters((prev) => ({ ...prev, feishu_app_id: String(appId), skip: 0 }));
+    setFormData((prev) => ({ ...prev, feishu_app_id: appId }));
+    setQrUrl('');
+    try {
+      await fetchQRUrl(appId);
+    } catch (error) {
+      alert('切换飞书应用失败，请稍后重试');
     }
   };
 
@@ -303,8 +319,8 @@ const UserManagement: React.FC = () => {
               onChange={(event) => {
                 const appId = Number(event.target.value);
                 setSelectedFeishuAppId(appId);
-                setFilters({ ...filters, feishu_app_id: String(appId), skip: 0 });
-                setFormData({ ...formData, feishu_app_id: appId });
+                setFilters((prev) => ({ ...prev, feishu_app_id: String(appId), skip: 0 }));
+                setFormData((prev) => ({ ...prev, feishu_app_id: appId }));
               }}
               className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
             >
@@ -383,6 +399,7 @@ const UserManagement: React.FC = () => {
               <tr>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">用户信息</th>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">角色</th>
+                <th className="hidden md:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">飞书应用</th>
                 <th className="hidden md:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">飞书ID</th>
                 <th className="px-4 md:px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">状态</th>
                 <th className="hidden lg:table-cell px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">创建时间</th>
@@ -392,11 +409,11 @@ const UserManagement: React.FC = () => {
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">加载中...</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">加载中...</td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-12 text-center text-gray-500">暂无用户数据</td>
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">暂无用户数据</td>
                 </tr>
               ) : (
                 users.map((user) => (
@@ -404,6 +421,7 @@ const UserManagement: React.FC = () => {
                     <td className="px-4 md:px-6 py-4">
                       <div className="text-sm font-medium text-gray-900">{user.name}</div>
                       <div className="text-xs text-gray-500 md:hidden">{user.feishu_user_id}</div>
+                      <div className="text-xs text-gray-400 md:hidden">{user.feishu_app_name || '-'}</div>
                       {user.email && <div className="text-xs text-gray-400">{user.email}</div>}
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap">
@@ -411,9 +429,11 @@ const UserManagement: React.FC = () => {
                         {getRoleLabel(user.role)}
                       </span>
                     </td>
+                    <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                      {user.feishu_app_name || '-'}
+                    </td>
                     <td className="hidden md:table-cell px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      <div>{user.feishu_user_id}</div>
-                      <div className="text-xs text-gray-400">{user.feishu_app_name || '-'}</div>
+                      {user.feishu_user_id}
                     </td>
                     <td className="px-4 md:px-6 py-4 whitespace-nowrap">
                       <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${user.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
@@ -663,6 +683,20 @@ const UserManagement: React.FC = () => {
             </div>
             <div className="text-center">
               <p className="text-sm text-gray-600 mb-4">请让新用户用飞书扫描下方二维码</p>
+              {feishuApps.length > 1 && (
+                <div className="mb-4 text-left">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">归属飞书应用</label>
+                  <select
+                    value={selectedFeishuAppId || ''}
+                    onChange={(event) => handleQRAppChange(Number(event.target.value))}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                  >
+                    {feishuApps.map((app) => (
+                      <option key={app.id} value={app.id}>{app.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               {qrUrl ? (
                 <div className="flex justify-center mb-4">
                   <div className="border border-gray-200 rounded-lg p-3 bg-white">
