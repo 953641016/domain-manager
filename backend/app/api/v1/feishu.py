@@ -61,6 +61,18 @@ def _start_async_card_background_task(name: str, coro_func, *args) -> None:
 
     _start_card_background_task(name, runner)
 
+
+def _extract_url_verification_challenge(body: Dict[str, Any]) -> Optional[str]:
+    """兼容飞书 URL 验证的 1.0/2.0 事件格式，提取 challenge。"""
+    if body.get("type") == "url_verification" and body.get("challenge"):
+        return body.get("challenge")
+    if body.get("header", {}).get("event_type") == "url_verification":
+        event = body.get("event") or {}
+        return event.get("challenge") or body.get("challenge")
+    if body.get("challenge") and not body.get("event"):
+        return body.get("challenge")
+    return None
+
 # ── 已知 section 列表 ──────────────────────────────────────
 SECTIONS_WITH_BITABLE = {
     "vercel":           {"label": "Vercel 域名解析",     "request_type": "dns_record"},
@@ -250,6 +262,10 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
                   request_body.get("type") or request_body.get("header", {}).get("event_type"))
 
         # 签名验证：兼容 schema 1.0（token 在根节点）和 2.0（token 在 header）
+        challenge = _extract_url_verification_challenge(request_body)
+        if challenge:
+            return {"challenge": challenge}
+
         token_in_body = (
             request_body.get("token")
             or request_body.get("header", {}).get("token")
