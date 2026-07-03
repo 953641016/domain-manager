@@ -20,10 +20,9 @@ router = APIRouter(prefix="/site-deployments", tags=["Site deployments"])
 
 
 class SiteDeploymentRequest(BaseModel):
-    domain: Optional[str] = Field(default=None, description="Base domain or svc domain")
-    doc_url: Optional[str] = Field(default=None, description="Feishu doc URL used when domain is omitted")
+    register_domain: Optional[str] = Field(default=None, description="Base domain or svc domain")
+    doc_url: Optional[str] = Field(default=None, description="Feishu doc URL used when register_domain is omitted")
     applicant_feishu_id: str = Field(..., min_length=1, max_length=100)
-    operator_name: str = Field(..., min_length=1, max_length=100)
     website_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     appid: Optional[str] = Field(default=None, min_length=1, max_length=64)
     authors: Optional[list[str]] = Field(default=None, description="Frontend authors for auto-site API")
@@ -79,11 +78,12 @@ def deploy_site(
     audit = AuditService(db)
     applicant = getattr(request.state, "site_deployment_applicant", None)
     specialist = getattr(request.state, "site_deployment_specialist", None)
+    operator_name = getattr(applicant, "name", None) or data.applicant_feishu_id.strip()
     try:
         result = service.deploy_and_notify(
-            domain=data.domain,
+            domain=data.register_domain,
             doc_url=data.doc_url,
-            operator_name=data.operator_name.strip(),
+            operator_name=operator_name,
             website_name=data.website_name.strip() if data.website_name else None,
             appid=data.appid.strip() if data.appid else None,
             authors=data.authors,
@@ -100,7 +100,8 @@ def deploy_site(
                 "applicant_feishu_id": data.applicant_feishu_id.strip(),
                 "specialist_id": getattr(specialist, "id", None),
                 "specialist_name": getattr(specialist, "name", None),
-                "operator_name": data.operator_name.strip(),
+                "operator_name": operator_name,
+                "register_domain": data.register_domain,
                 "doc_url": data.doc_url,
                 "website_name": data.website_name,
                 "appid": data.appid,
@@ -115,14 +116,15 @@ def deploy_site(
         audit.log(
             action="deploy_nginx_site",
             resource_type="site_deployment",
-            resource_name=data.domain,
+            resource_name=data.register_domain,
             user_id=getattr(applicant, "id", None),
             user_name=getattr(applicant, "name", None) or data.applicant_feishu_id,
             after_state={
                 "applicant_feishu_id": data.applicant_feishu_id.strip(),
                 "specialist_id": getattr(specialist, "id", None),
                 "specialist_name": getattr(specialist, "name", None),
-                "operator_name": data.operator_name.strip(),
+                "operator_name": operator_name,
+                "register_domain": data.register_domain,
                 "doc_url": data.doc_url,
                 "website_name": data.website_name,
                 "appid": data.appid,
