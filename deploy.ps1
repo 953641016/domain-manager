@@ -3,7 +3,7 @@
 # 自动上传项目到服务器并执行部署
 # ============================================================================
 
-$SERVER_IP = "115.28.211.155"
+$SERVER_IP = "47.79.243.31"
 $SERVER_USER = "root"
 $SERVER_PASS = "Cy1411dd"
 $REMOTE_DIR = "/opt/domain-manager"
@@ -37,7 +37,7 @@ Write-Host "请手动执行以下命令上传项目：" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "方法1: 使用 Git Bash (推荐)" -ForegroundColor Green
 Write-Host "  cd d:/WorkSpace/domain-manager" -ForegroundColor White
-Write-Host '  scp -r . root@115.28.211.155:/opt/domain-manager/' -ForegroundColor White
+Write-Host '  scp -r . root@47.79.243.31:/opt/domain-manager/' -ForegroundColor White
 Write-Host ""
 Write-Host "方法2: 使用 WinSCP" -ForegroundColor Green
 Write-Host "  下载 WinSCP: https://winscp.net/eng/download.php" -ForegroundColor White

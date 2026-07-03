@@ -39,7 +39,7 @@
 | 配置项 | 值 |
 |--------|----|
 | 重定向 URL（OAuth 回调） | `https://d.fwxg.com/dm/api/auth/callback` |
-| IP 白名单 | `115.28.211.155`（生产服务器 IP） |
+| IP 白名单 | `47.79.243.31`（生产服务器 IP） |
 
 > ⚠️ 重定向 URL 路径**不含 `v1`**。Nginx `rewrite` 规则负责将 `/dm/api/auth/callback` → `/api/v1/auth/callback`（见 §3.4）。  
 > 填写时**不要**写成 `/dm/api/v1/auth/callback`，否则后端会收到 `/api/v1/v1/auth/callback` → 404。
@@ -97,7 +97,7 @@
 ```
 [ ] 凭证：App ID / App Secret 已填入 .env
 [ ] 安全设置：重定向 URL 已添加
-[ ] 安全设置：IP 白名单 115.28.211.155 已添加
+[ ] 安全设置：IP 白名单 47.79.243.31 已添加
 [ ] 权限管理：以上权限均已开通
 [ ] 机器人：功能已启用
 [ ] 事件配置：im.message.receive_v1 已订阅，请求地址正确

@@ -7,7 +7,7 @@
 
 | 项目 | 值 |
 |------|-----|
-| IP | 115.28.211.155 |
+| IP | 47.79.243.31 |
 | 用户 | root |
 | 系统 | Ubuntu 24.04 LTS |
 | 配置 | 2核2G内存 + 40GB SSD |
@@ -29,7 +29,7 @@
 ### 第1步：SSH连接服务器
 
 ```bash
-ssh root@115.28.211.155
+ssh root@47.79.243.31
 ```
 
 ### 第2步：下载部署脚本
@@ -94,7 +94,7 @@ systemctl enable docker
 cd d:/WorkSpace/domain-manager
 
 # 使用scp上传整个项目
-scp -r . root@115.28.211.155:/opt/domain-manager/
+scp -r . root@47.79.243.31:/opt/domain-manager/
 ```
 
 ### 4. 配置环境变量
@@ -148,7 +148,7 @@ docker compose ps
 
 ```bash
 # 通过IP访问
-curl http://115.28.211.155
+curl http://47.79.243.31
 
 # 通过域名访问（需先配置DNS）
 curl https://d.fwxg.com
@@ -165,7 +165,7 @@ curl https://d.fwxg.com
 2. 添加A记录：
    - 主机记录: @ 或 d
    - 记录类型: A
-   - 记录值: 115.28.211.155
+   - 记录值: 47.79.243.31
 
 ### 2. 配置飞书应用
 

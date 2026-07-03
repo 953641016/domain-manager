@@ -203,12 +203,12 @@ ngrok http 8000
 
 **方案 B：在服务器上调试（⚠️ 警告：操作的是生产环境）**
 
-> **安全警告**：`115.28.211.155` 是生产服务器，在服务器上直接修改代码将立即影响线上用户。  
+> **安全警告**：`47.79.243.31` 是生产服务器，在服务器上直接修改代码将立即影响线上用户。
 > 根据项目规范，SSH 进生产机需每次得到用户明确授权，且修改后须提交 git 并走正常发布流程。  
 > **仅在紧急情况下使用**，且操作结束后必须将修改同步回 git。
 
 ```bash
-ssh -i ~/.toolchain/zj_deploy.pem root@115.28.211.155
+ssh -i ~/.toolchain/zj_deploy.pem root@47.79.243.31
 cd /opt/domain-manager
 # 临时修改代码后，必须提交到 git 并通过 deploy.sh 正式部署
 docker restart domain-manager-backend
