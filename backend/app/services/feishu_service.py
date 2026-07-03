@@ -4,8 +4,12 @@
 """
 import requests
 import json
+import base64
+import hashlib
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta, timezone
+from cryptography.hazmat.primitives import padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from app.config import Config
 
 
@@ -503,6 +507,26 @@ class FeishuService:
         if not self.verification_token:
             return True
         return token == self.verification_token
+
+    def decrypt_event_body(self, encrypted: str) -> Dict[str, Any]:
+        """解密飞书事件订阅的 encrypt 请求体。"""
+        if not self.encrypt_key:
+            raise ValueError("飞书 Encrypt Key 未配置，无法解密事件")
+        if not encrypted:
+            raise ValueError("飞书加密事件内容为空")
+
+        raw = base64.b64decode(encrypted)
+        if len(raw) <= 16:
+            raise ValueError("飞书加密事件格式不正确")
+
+        key = hashlib.sha256(self.encrypt_key.encode("utf-8")).digest()
+        iv = raw[:16]
+        ciphertext = raw[16:]
+        decryptor = Cipher(algorithms.AES(key), modes.CBC(iv)).decryptor()
+        padded = decryptor.update(ciphertext) + decryptor.finalize()
+        unpadder = padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded) + unpadder.finalize()
+        return json.loads(plaintext.decode("utf-8"))
     
     def handle_url_verification(self, request_body: Dict[str, Any]) -> Dict[str, Any]:
         """

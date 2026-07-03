@@ -254,6 +254,8 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
         request_body = await request.json()
         app = FeishuAppService(db).get_app(app_code=app_code) if app_code else None
         current_feishu_service = FeishuAppService(db).get_service(app_code=app_code) if app_code else feishu_service
+        if request_body.get("encrypt"):
+            request_body = current_feishu_service.decrypt_event_body(request_body.get("encrypt"))
         if app:
             request_body["_feishu_app_id"] = app.id
 
