@@ -69,6 +69,21 @@ class Config:
     ADMIN_USER_IDS = os.getenv("ADMIN_USER_IDS", "").split(",")
 
     # --------------------------------------------------------------------------
+    # Site deployment integration
+    # --------------------------------------------------------------------------
+    SITE_DEPLOY_API_URL = os.getenv("SITE_DEPLOY_API_URL", "http://3.238.24.187/deploy-nginx-site")
+    SITE_DEPLOY_API_TOKEN = os.getenv("SITE_DEPLOY_API_TOKEN", "")
+    SITE_DEPLOY_TIMEOUT_SECONDS = int(os.getenv("SITE_DEPLOY_TIMEOUT_SECONDS", "900"))
+    SITE_DEPLOY_POLL_INTERVAL_SECONDS = float(os.getenv("SITE_DEPLOY_POLL_INTERVAL_SECONDS", "3"))
+
+    SITE_POST_DEPLOY_API_URL = os.getenv(
+        "SITE_POST_DEPLOY_API_URL",
+        "https://manage.xwbc.com/api/autoSite/createAutoSite",
+    )
+    SITE_POST_DEPLOY_API_TOKEN = os.getenv("SITE_POST_DEPLOY_API_TOKEN", "")
+    SITE_POST_DEPLOY_API_TOKEN_HEADER = os.getenv("SITE_POST_DEPLOY_API_TOKEN_HEADER", "x-token")
+
+    # --------------------------------------------------------------------------
     # 日志配置
     # --------------------------------------------------------------------------
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")

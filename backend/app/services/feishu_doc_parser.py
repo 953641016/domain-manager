@@ -6,7 +6,7 @@
 import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 import requests
 
@@ -212,6 +212,68 @@ class FeishuDocParser:
     def get_raw_content(self, doc_token: str) -> str:
         data = self._get(f"/open-apis/docx/v1/documents/{doc_token}/raw_content")
         return data.get("content") or ""
+
+    def get_document_blocks(self, doc_token: str) -> List[Dict[str, Any]]:
+        blocks: List[Dict[str, Any]] = []
+        page_token = ""
+        while True:
+            path = f"/open-apis/docx/v1/documents/{doc_token}/blocks?page_size=500"
+            if page_token:
+                path += f"&page_token={quote(page_token)}"
+            data = self._get(path)
+            blocks.extend(data.get("items") or [])
+            page_token = data.get("page_token") or ""
+            if not data.get("has_more") or not page_token:
+                break
+        return blocks
+
+    def list_document_sheet_refs(self, doc_token: str) -> List[Dict[str, str]]:
+        refs: List[Dict[str, str]] = []
+        seen = set()
+
+        def visit(value: Any) -> None:
+            if isinstance(value, dict):
+                token = self._first_value(value, ("token", "spreadsheet_token", "spreadsheetToken"))
+                sheet_id = self._first_value(value, ("sheet_id", "sheetId"))
+                if token and sheet_id:
+                    key = (token, sheet_id)
+                    if key not in seen:
+                        seen.add(key)
+                        refs.append({"token": token, "sheet_id": sheet_id})
+                for nested in value.values():
+                    visit(nested)
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested)
+            elif isinstance(value, str):
+                for token, sheet_id in re.findall(r"([A-Za-z0-9]{8,})_([A-Za-z0-9]{3,})", value):
+                    key = (token, sheet_id)
+                    if key not in seen:
+                        seen.add(key)
+                        refs.append({"token": token, "sheet_id": sheet_id})
+
+        for block in self.get_document_blocks(doc_token):
+            visit(block)
+        return refs
+
+    def get_sheet_values(
+        self,
+        spreadsheet_token: str,
+        sheet_id: str,
+        cell_range: str = "A1:Z80",
+    ) -> List[List[Any]]:
+        range_path = quote(f"{sheet_id}!{cell_range}", safe="")
+        data = self._get(f"/open-apis/sheets/v2/spreadsheets/{spreadsheet_token}/values/{range_path}")
+        value_range = data.get("valueRange") or data.get("value_range") or {}
+        return value_range.get("values") or data.get("values") or []
+
+    @staticmethod
+    def _first_value(data: Dict[str, Any], keys: tuple[str, ...]) -> str:
+        for key in keys:
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
 
     def _tenant_access_token(self) -> str:
         if self._tenant_token:
