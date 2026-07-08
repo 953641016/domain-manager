@@ -87,6 +87,7 @@ def deploy_site(
             website_name=data.website_name.strip() if data.website_name else None,
             appid=data.appid.strip() if data.appid else None,
             authors=data.authors,
+            applicant=applicant,
             timeout_seconds=data.timeout_seconds,
             poll_interval_seconds=data.poll_interval_seconds,
         )

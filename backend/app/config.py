@@ -39,6 +39,14 @@ class Config:
     FEISHU_ENCRYPT_KEY = os.getenv("FEISHU_ENCRYPT_KEY", "")
     SUPER_ADMIN_FEISHU_USER_ID = os.getenv("SUPER_ADMIN_FEISHU_USER_ID", "")
     BACKEND_DNS_DEFAULT_TARGET = os.getenv("BACKEND_DNS_DEFAULT_TARGET", "54.89.199.228")
+    BACKEND_DNS_DEFAULT_HOSTNAME = os.getenv("BACKEND_DNS_DEFAULT_HOSTNAME", "svc")
+    BACKEND_DNS_JINAN_HOSTNAME = os.getenv("BACKEND_DNS_JINAN_HOSTNAME", "art")
+    BACKEND_DNS_JINAN_TARGET = os.getenv("BACKEND_DNS_JINAN_TARGET", "20.9.240.31")
+    BACKEND_DNS_JINAN_APPLICANT_MATCHERS = [
+        item.strip()
+        for item in os.getenv("BACKEND_DNS_JINAN_APPLICANT_MATCHERS", "\u6d4e\u5357").split(",")
+        if item.strip()
+    ]
 
     # --------------------------------------------------------------------------
     # Cloudflare 配置

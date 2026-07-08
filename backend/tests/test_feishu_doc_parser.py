@@ -1,3 +1,4 @@
+from app.services.backend_dns_profile import BackendDnsProfile
 from app.services.feishu_doc_parser import FeishuDocParser
 
 
@@ -135,3 +136,31 @@ def test_parse_metadata_does_not_require_dns_records(monkeypatch):
     assert parsed.request_type == "dns_record"
     assert parsed.records == []
     assert parsed.raw_sections == {"metadata_only": True}
+
+
+def test_parse_backend_dns_uses_jinan_profile_without_backend_section(monkeypatch):
+    parser = FeishuDocParser()
+    monkeypatch.setattr(parser, "resolve_doc_token", lambda doc_url: "doc_token")
+    monkeypatch.setattr(parser, "get_document_title", lambda doc_token: "nanobanana2lite.tools")
+    monkeypatch.setattr(
+        parser,
+        "get_raw_content",
+        lambda doc_token: "Nano Banana 2 Lite",
+    )
+
+    parsed = parser.parse(
+        "https://z1d0kcqb3nl.feishu.cn/docx/STxEdgoTKowKqFxR58actq1Ynxf",
+        "backend_dns",
+        backend_profile=BackendDnsProfile(name="jinan", hostname="art", target="20.9.240.31"),
+    )
+
+    assert parsed.domain == "nanobanana2lite.tools"
+    assert parsed.records == [
+        {
+            "hostname": "art",
+            "type": "A",
+            "target": "20.9.240.31",
+            "provider_section": "backend",
+            "ttl": 300,
+        }
+    ]

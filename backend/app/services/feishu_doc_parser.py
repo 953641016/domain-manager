@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, quote, unquote, urlparse
 import requests
 
 from app.config import Config
+from app.services.backend_dns_profile import BackendDnsProfile
 
 
 ACTION_LABELS = {
@@ -54,7 +55,13 @@ class FeishuDocParser:
         self.app_secret = Config.FEISHU_APP_SECRET
         self._tenant_token: Optional[str] = None
 
-    def parse(self, doc_url: str, action: str, doc_format: str = "standard_v1") -> ParsedDocRequest:
+    def parse(
+        self,
+        doc_url: str,
+        action: str,
+        doc_format: str = "standard_v1",
+        backend_profile: Optional[BackendDnsProfile] = None,
+    ) -> ParsedDocRequest:
         if action not in ACTION_LABELS:
             raise ValueError(f"未知 action: {action}")
         if doc_format != "standard_v1":
@@ -73,7 +80,7 @@ class FeishuDocParser:
             "vercel": self._parse_vercel(lines, domain),
             "clerk": self._parse_clerk(lines, domain),
             "gsc": self._parse_gsc(lines),
-            "backend": self._parse_backend(lines, domain),
+            "backend": self._parse_backend(lines, domain, backend_profile=backend_profile),
         }
 
         if action == "domain_purchase":
@@ -448,15 +455,23 @@ class FeishuDocParser:
                 return [self._record("@", "TXT", target, "gsc")]
         return []
 
-    def _parse_backend(self, lines: List[str], domain: str) -> List[Dict[str, Any]]:
+    def _parse_backend(
+        self,
+        lines: List[str],
+        domain: str,
+        backend_profile: Optional[BackendDnsProfile] = None,
+    ) -> List[Dict[str, Any]]:
         section = self._section_lines(lines, "后端接口服务域名解析", ["网站邮箱支持解析", "三、开发需求", "四、"])
         if not section:
             section = self._section_lines(lines, "接口域名解析", ["网站邮箱支持解析", "三、开发需求", "四、"])
+        if backend_profile and backend_profile.name != "default":
+            return [self._record(backend_profile.hostname, "A", backend_profile.target, "backend")]
         for line in section:
             candidate = self._first_domain(line)
             if candidate and candidate.endswith(domain):
-                target = Config.BACKEND_DNS_DEFAULT_TARGET
-                return [self._record(self._relative_host(candidate, domain), "A", target, "backend")]
+                target = backend_profile.target if backend_profile else Config.BACKEND_DNS_DEFAULT_TARGET
+                hostname = backend_profile.hostname if backend_profile else self._relative_host(candidate, domain)
+                return [self._record(hostname, "A", target, "backend")]
         return []
 
     @staticmethod

@@ -455,6 +455,7 @@ def submit_doc_button_request(
     from app.services.user_service import UserService
     from app.services.request_service import RequestService
     from app.services.feishu_doc_parser import FeishuDocParser
+    from app.services.backend_dns_profile import resolve_backend_dns_profile
     from app.schemas.request import RequestCreate
 
     if body is None:
@@ -522,7 +523,12 @@ def submit_doc_button_request(
             parsed.records = [_build_gsc_verification_record(gsc_verification_override)]
             parsed.raw_sections = {"gsc_source": "request_param"}
         else:
-            parsed = FeishuDocParser().parse(body.doc_url, body.action, body.doc_format)
+            parsed = FeishuDocParser().parse(
+                body.doc_url,
+                body.action,
+                body.doc_format,
+                backend_profile=resolve_backend_dns_profile(applicant),
+            )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

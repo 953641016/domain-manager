@@ -11,6 +11,10 @@ def test_to_service_domain_keeps_existing_svc_domain():
     assert SiteDeploymentService.to_service_domain("svc.example.com") == "svc.example.com"
 
 
+def test_to_service_domain_uses_requested_backend_hostname():
+    assert SiteDeploymentService.to_service_domain("svc.example.com", service_hostname="art") == "art.example.com"
+
+
 def test_build_post_deploy_payload_leaves_future_fields_empty():
     payload = SiteDeploymentService.build_post_deploy_payload(
         base_domain="example.com",
@@ -127,6 +131,23 @@ def test_resolve_service_domain_prefers_backend_record(monkeypatch):
     assert service_domain == "svc.example.com"
     assert resolution["source"] == "feishu_doc_backend_record"
     assert resolution["base_domain"] == "example.com"
+
+
+def test_resolve_service_domain_uses_jinan_profile_for_request_domain():
+    applicant = SimpleNamespace(department="\u6d4e\u5357\u7ec4")
+
+    service_domain, resolution = SiteDeploymentService(deploy_api_token="token").resolve_service_domain(
+        domain="nanobanana2lite.tools",
+        doc_url=None,
+        applicant=applicant,
+    )
+
+    assert service_domain == "art.nanobanana2lite.tools"
+    assert resolution["source"] == "request_domain"
+    assert resolution["base_domain"] == "nanobanana2lite.tools"
+    assert resolution["backend_dns_profile"] == "jinan"
+    assert resolution["backend_dns_hostname"] == "art"
+    assert resolution["backend_dns_target"] == "20.9.240.31"
 
 
 def test_deploy_and_notify_waits_then_calls_post_api(monkeypatch):

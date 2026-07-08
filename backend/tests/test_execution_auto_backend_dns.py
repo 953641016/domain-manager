@@ -20,12 +20,40 @@ def test_build_auto_backend_dns_request_data_uses_svc_a_record():
     assert data["action"] == "backend_dns"
     assert data["action_label"] == "后端接口服务域名解析"
     assert data["auto_created"] is True
+    assert data["backend_dns_profile"] == "default"
     assert data["source_request_id"] == "source-request-id"
     assert data["records"] == [
         {
             "hostname": "svc",
             "type": "A",
             "target": "54.89.199.228",
+            "provider_section": "backend",
+            "ttl": 300,
+        }
+    ]
+
+
+def test_build_auto_backend_dns_request_data_uses_jinan_art_record():
+    request = SimpleNamespace(
+        id="source-request-id",
+        domain_name="nanobanana2lite.tools",
+        requester=SimpleNamespace(department="\u6d4e\u5357\u7ec4"),
+        request_data={
+            "doc_url": "https://z1d0kcqb3nl.feishu.cn/docx/STxEdgoTKowKqFxR58actq1Ynxf",
+            "doc_token": "doc_token",
+            "doc_title": "Nano Banana 2 Lite",
+            "doc_format": "standard_v1",
+        },
+    )
+
+    data = ExecutionService._build_auto_backend_dns_request_data(request)
+
+    assert data["backend_dns_profile"] == "jinan"
+    assert data["records"] == [
+        {
+            "hostname": "art",
+            "type": "A",
+            "target": "20.9.240.31",
             "provider_section": "backend",
             "ttl": 300,
         }

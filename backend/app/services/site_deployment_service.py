@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 import requests
 
 from app.config import Config
+from app.services.backend_dns_profile import known_backend_hostnames, resolve_backend_dns_profile
 from app.services.feishu_doc_parser import FeishuDocParser
 
 
@@ -65,17 +66,22 @@ class SiteDeploymentService:
         return raw
 
     @classmethod
-    def to_service_domain(cls, domain: str) -> str:
+    def to_service_domain(cls, domain: str, service_hostname: Optional[str] = None) -> str:
         normalized = cls.normalize_domain(domain)
-        if normalized.startswith("svc."):
-            return normalized
-        return f"svc.{normalized}"
+        hostname = (service_hostname or Config.BACKEND_DNS_DEFAULT_HOSTNAME).strip().lower().rstrip(".")
+        base_domain = cls.to_base_domain(normalized, service_hostname=hostname)
+        return f"{hostname}.{base_domain}" if hostname else base_domain
 
     @classmethod
-    def to_base_domain(cls, domain: str) -> str:
+    def to_base_domain(cls, domain: str, service_hostname: Optional[str] = None) -> str:
         normalized = cls.normalize_domain(domain)
-        if normalized.startswith("svc."):
-            return normalized[4:]
+        hostnames = known_backend_hostnames()
+        if service_hostname:
+            hostnames.add(service_hostname.strip().lower().rstrip("."))
+        for hostname in sorted(hostnames, key=len, reverse=True):
+            prefix = f"{hostname}."
+            if hostname and normalized.startswith(prefix):
+                return normalized[len(prefix):]
         return normalized
 
     @staticmethod
@@ -284,12 +290,21 @@ class SiteDeploymentService:
             "source": source,
         }
 
-    def resolve_service_domain(self, domain: Optional[str], doc_url: Optional[str]) -> tuple[str, dict[str, Any]]:
+    def resolve_service_domain(
+        self,
+        domain: Optional[str],
+        doc_url: Optional[str],
+        applicant: Any = None,
+    ) -> tuple[str, dict[str, Any]]:
+        profile = resolve_backend_dns_profile(applicant)
         if domain and domain.strip():
-            service_domain = self.to_service_domain(domain)
+            service_domain = self.to_service_domain(domain, service_hostname=profile.hostname)
             return service_domain, {
                 "source": "request_domain",
-                "base_domain": self.to_base_domain(service_domain),
+                "base_domain": self.to_base_domain(service_domain, service_hostname=profile.hostname),
+                "backend_dns_profile": profile.name,
+                "backend_dns_hostname": profile.hostname,
+                "backend_dns_target": profile.target,
             }
         if not doc_url or not doc_url.strip():
             raise ValueError("domain or doc_url is required")
@@ -304,17 +319,32 @@ class SiteDeploymentService:
             raise ValueError("failed to parse base domain from Feishu doc")
         base_domain = self.normalize_domain(raw_base_domain)
 
+        if profile.name != "default":
+            service_domain = self.to_service_domain(base_domain, service_hostname=profile.hostname)
+            return service_domain, {
+                "source": "applicant_backend_profile",
+                "doc_token": doc_token,
+                "doc_title": title,
+                "base_domain": base_domain,
+                "backend_dns_profile": profile.name,
+                "backend_dns_hostname": profile.hostname,
+                "backend_dns_target": profile.target,
+            }
+
         backend_records = parser._parse_backend(lines, base_domain)
         for record in backend_records:
             hostname = str(record.get("hostname") or "").strip().lower().rstrip(".")
             if hostname:
                 if hostname == "@":
-                    service_domain = self.to_service_domain(base_domain)
+                    service_domain = self.to_service_domain(base_domain, service_hostname=profile.hostname)
                     return service_domain, {
                         "source": "feishu_doc_backend_fallback",
                         "doc_token": doc_token,
                         "doc_title": title,
                         "base_domain": base_domain,
+                        "backend_dns_profile": profile.name,
+                        "backend_dns_hostname": profile.hostname,
+                        "backend_dns_target": profile.target,
                     }
                 service_domain = hostname if hostname.endswith(f".{base_domain}") else f"{hostname}.{base_domain}"
                 service_domain = self.normalize_domain(service_domain)
@@ -323,14 +353,20 @@ class SiteDeploymentService:
                     "doc_token": doc_token,
                     "doc_title": title,
                     "base_domain": base_domain,
+                    "backend_dns_profile": profile.name,
+                    "backend_dns_hostname": profile.hostname,
+                    "backend_dns_target": profile.target,
                 }
 
-        service_domain = self.to_service_domain(base_domain)
+        service_domain = self.to_service_domain(base_domain, service_hostname=profile.hostname)
         return service_domain, {
             "source": "feishu_doc_base_domain",
             "doc_token": doc_token,
             "doc_title": title,
             "base_domain": base_domain,
+            "backend_dns_profile": profile.name,
+            "backend_dns_hostname": profile.hostname,
+            "backend_dns_target": profile.target,
         }
 
     def submit_deploy_task(self, service_domain: str) -> dict[str, Any]:
@@ -449,11 +485,18 @@ class SiteDeploymentService:
         website_name: Optional[str] = None,
         appid: Optional[str] = None,
         authors: Optional[list[str]] = None,
+        applicant: Any = None,
         timeout_seconds: Optional[int] = None,
         poll_interval_seconds: Optional[float] = None,
     ) -> dict[str, Any]:
-        service_domain, resolution = self.resolve_service_domain(domain, doc_url)
-        base_domain = str(resolution.get("base_domain") or self.to_base_domain(service_domain))
+        service_domain, resolution = self.resolve_service_domain(domain, doc_url, applicant=applicant)
+        base_domain = str(
+            resolution.get("base_domain")
+            or self.to_base_domain(
+                service_domain,
+                service_hostname=str(resolution.get("backend_dns_hostname") or ""),
+            )
+        )
         payment_config = self.parse_payment_config(doc_url)
         post_payload = self.build_post_deploy_payload(
             base_domain=base_domain,

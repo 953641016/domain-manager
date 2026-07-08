@@ -20,10 +20,10 @@ from app.models.domain import Domain
 from app.models.user import User
 from app.services.domain_service import DomainService
 from app.services.audit_service import AuditService
+from app.services.backend_dns_profile import resolve_backend_dns_profile
 from app.services.feishu_service import FeishuService
 from app.services.feishu_app_service import get_feishu_service_for_user, FeishuAppService
 from app.adapters.registrar_factory import RegistrarFactory
-from app.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -466,7 +466,8 @@ class ExecutionService:
     @staticmethod
     def _build_auto_backend_dns_request_data(request: Request, target: Optional[str] = None) -> Dict[str, Any]:
         original_data = request.request_data or {}
-        target_value = target or Config.BACKEND_DNS_DEFAULT_TARGET
+        profile = resolve_backend_dns_profile(getattr(request, "requester", None))
+        target_value = target or profile.target
         return {
             "action": "backend_dns",
             "action_label": "后端接口服务域名解析",
@@ -476,12 +477,13 @@ class ExecutionService:
             "doc_format": original_data.get("doc_format") or "standard_v1",
             "domain": request.domain_name,
             "dns_provider": "backend_dns",
+            "backend_dns_profile": profile.name,
             "auto_created": True,
             "auto_created_reason": "domain_register_completed",
             "source_request_id": request.id,
             "records": [
                 {
-                    "hostname": "svc",
+                    "hostname": profile.hostname,
                     "type": "A",
                     "target": target_value,
                     "provider_section": "backend",

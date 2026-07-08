@@ -285,7 +285,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 - `source` 可选：默认 `feishu_doc_button`，建议多维表格按钮传 `feishu_bitable_button`，方便审计来源。
 - `register_domain` 可选：仅 `domain_purchase` 使用。传入后默认注册该域名，不再从飞书文档正文解析域名；为空时保持原流程，从文档中解析域名。DNS 解析类按钮不需要、也不会使用该参数。
 - `gsc_verification` 可选：仅 `gsc_dns` 使用。传入 `google-site-verification=...` 时，GSC TXT 记录值直接使用该参数；为空或不传时保持原流程，从飞书文档中解析 GSC 认证值。主域名仍从 `doc_url` 对应文档解析，因此 `doc_url` 仍必填。
-- 后端接口服务域名若文档只写 `svc.example.com`，解析目标由环境变量 `BACKEND_DNS_DEFAULT_TARGET` 提供，当前默认值为 `54.89.199.228`。
+- 后端接口服务域名按申请人匹配后台 profile。默认生成 `svc.example.com`，解析目标由 `BACKEND_DNS_DEFAULT_TARGET` 提供，当前默认值为 `54.89.199.228`；申请人信息命中“济南”时生成 `art.example.com`，解析到 `20.9.240.31`。
 
 ### 请求字段说明
 
@@ -316,7 +316,7 @@ POST https://d.fwxg.com/dm/api/feishu/doc-button/submit?action=domain_purchase&d
 
 > `register_domain` 只配置在域名购买按钮上；Clerk、后端、Vercel、CF、GSC 等 DNS 解析按钮不要配置该字段。域名购买按钮传 `register_domain` 后，`doc_url` 可以为空；后端只保存来源链接，不解析文档 token。
 
-> 域名注册成功后，系统会自动为同一域名创建 `backend_dns` 待审批申请，并发送给同一个域名专员审批；因此注册流程不需要再额外点击“后端接口服务域名解析”按钮。自动申请默认生成 `svc` 的 A 记录，目标值为 `BACKEND_DNS_DEFAULT_TARGET`。
+> 域名注册成功后，系统会自动为同一域名创建 `backend_dns` 待审批申请，并发送给同一个域名专员审批；因此注册流程不需要再额外点击“后端接口服务域名解析”按钮。自动申请会按申请人后台 profile 生成记录：默认 `svc` 指向 `BACKEND_DNS_DEFAULT_TARGET`，济南组 `art` 指向 `20.9.240.31`。
 
 一键解析按钮（Clerk + 后端 + Vercel + CF，不含购买和 GSC）：
 
