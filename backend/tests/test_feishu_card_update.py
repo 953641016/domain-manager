@@ -1,5 +1,6 @@
 import json
 import asyncio
+import hashlib
 from datetime import datetime
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ from app.api.v1.feishu import (
     _handle_card_action,
     _handle_doc_request_card_action,
     _is_direct_register_form_expired,
+    _verify_feishu_callback_security,
     _resolve_direct_reg_account_id,
     _resolve_reg_account_id,
 )
@@ -47,6 +49,48 @@ def test_update_card_message_serializes_interactive_card(monkeypatch):
     assert captured["headers"]["Authorization"] == "Bearer test-token"
     assert captured["payload"]["content"] == json.dumps(card)
     assert captured["timeout"] == 10
+
+
+def test_card_callback_security_accepts_lark_header_signature_without_body_token():
+    service = FeishuService(
+        app_id="cli_test",
+        app_secret="secret",
+        verification_token="verify-token",
+        encrypt_key="encrypt-key",
+    )
+    raw_body = json.dumps({
+        "schema": "2.0",
+        "header": {"event_type": "card.action.trigger"},
+        "event": {"action": {"value": {"action": "approve_doc_request", "request_id": "1"}}},
+    }, separators=(",", ":")).encode("utf-8")
+    timestamp = "1720000000"
+    nonce = "nonce-1"
+    signature = hashlib.sha256(f"{timestamp}{nonce}{service.verification_token}".encode("utf-8") + raw_body).hexdigest()
+    headers = {
+        "x-lark-request-timestamp": timestamp,
+        "x-lark-request-nonce": nonce,
+        "x-lark-signature": signature,
+    }
+
+    assert _verify_feishu_callback_security(
+        service,
+        None,
+        headers,
+        raw_body,
+        is_card_action=True,
+        is_encrypted_body=False,
+    ) is True
+
+    bad_headers = dict(headers)
+    bad_headers["x-lark-signature"] = "0" * 64
+    assert _verify_feishu_callback_security(
+        service,
+        None,
+        bad_headers,
+        raw_body,
+        is_card_action=True,
+        is_encrypted_body=False,
+    ) is False
 
 
 def test_processed_confirmation_card_marks_approved_and_removes_actions():

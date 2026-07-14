@@ -2,6 +2,9 @@
 飞书相关API路由
 提供OAuth授权、用户信息获取、webhook事件处理等接口
 """
+import hashlib
+import hmac
+import json
 import logging
 
 from fastapi import APIRouter, Body, HTTPException, Query, Request, Depends
@@ -250,10 +253,11 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
     import logging
     _log = logging.getLogger("feishu.webhook")
     try:
-        # 解析请求体
-        request_body = await request.json()
+        raw_body = await request.body()
+        request_body = json.loads(raw_body.decode("utf-8") or "{}")
         app = FeishuAppService(db).get_app(app_code=app_code) if app_code else None
         current_feishu_service = FeishuAppService(db).get_service(app_code=app_code) if app_code else feishu_service
+        is_encrypted_body = bool(request_body.get("encrypt"))
         if request_body.get("encrypt"):
             request_body = current_feishu_service.decrypt_event_body(request_body.get("encrypt"))
         if app:
@@ -272,7 +276,16 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
             request_body.get("token")
             or request_body.get("header", {}).get("token")
         )
-        if not current_feishu_service.verify_webhook_signature_token(token_in_body):
+        event_type = request_body.get("header", {}).get("event_type")
+        is_card_action = _is_card_action_callback(request_body, event_type)
+        if not _verify_feishu_callback_security(
+            current_feishu_service,
+            token_in_body,
+            request.headers,
+            raw_body,
+            is_card_action=is_card_action,
+            is_encrypted_body=is_encrypted_body,
+        ):
             _log.warning("feishu webhook 签名验证失败 token=%s", token_in_body)
             raise HTTPException(status_code=403, detail="签名验证失败")
 
@@ -281,8 +294,6 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
             return current_feishu_service.handle_url_verification(request_body)
 
         # 处理其他事件
-        event_type = request_body.get("header", {}).get("event_type")
-
         if event_type == "im.message.receive_v1":
             event = request_body.get("event", {})
             await feishu_bot.handle_message(event)
@@ -292,7 +303,7 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
             return await _handle_bot_menu_event(request_body)
 
         # 处理卡片按钮回调（超管点击授权/拒绝账号操作）
-        if _is_card_action_callback(request_body, event_type):
+        if is_card_action:
             _log.info("feishu card action received")
             return await _handle_card_action(request_body)
 
@@ -305,6 +316,40 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
         import logging as _l
         _l.getLogger("feishu.webhook").exception("处理webhook失败")
         raise HTTPException(status_code=500, detail=f"处理webhook失败: {str(e)}")
+
+
+def _verify_feishu_callback_security(
+    service,
+    token_in_body: Optional[str],
+    headers,
+    raw_body: bytes,
+    *,
+    is_card_action: bool,
+    is_encrypted_body: bool,
+) -> bool:
+    if service.verify_webhook_signature_token(token_in_body):
+        return True
+
+    secrets: List[str] = []
+    if is_card_action and getattr(service, "verification_token", None):
+        secrets.append(service.verification_token)
+    if is_encrypted_body and getattr(service, "encrypt_key", None):
+        secrets.append(service.encrypt_key)
+    if getattr(service, "verification_token", None) and service.verification_token not in secrets:
+        secrets.append(service.verification_token)
+
+    return any(_verify_lark_signature(headers, raw_body, secret) for secret in secrets)
+
+
+def _verify_lark_signature(headers, raw_body: bytes, secret: str) -> bool:
+    timestamp = headers.get("x-lark-request-timestamp") or headers.get("X-Lark-Request-Timestamp")
+    nonce = headers.get("x-lark-request-nonce") or headers.get("X-Lark-Request-Nonce")
+    signature = headers.get("x-lark-signature") or headers.get("X-Lark-Signature")
+    if not timestamp or not nonce or not signature or not secret:
+        return False
+    base = f"{timestamp}{nonce}{secret}".encode("utf-8") + raw_body
+    expected = hashlib.sha256(base).hexdigest()
+    return hmac.compare_digest(expected, str(signature).lower())
 
 
 class SendMessageRequest(BaseModel):
