@@ -65,7 +65,7 @@ def test_card_callback_security_accepts_lark_header_signature_without_body_token
     }, separators=(",", ":")).encode("utf-8")
     timestamp = "1720000000"
     nonce = "nonce-1"
-    signature = hashlib.sha256(f"{timestamp}{nonce}{service.verification_token}".encode("utf-8") + raw_body).hexdigest()
+    signature = hashlib.sha256(f"{timestamp}{nonce}{service.encrypt_key}".encode("utf-8") + raw_body).hexdigest()
     headers = {
         "x-lark-request-timestamp": timestamp,
         "x-lark-request-nonce": nonce,

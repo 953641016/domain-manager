@@ -331,9 +331,8 @@ def _verify_feishu_callback_security(
         return True
 
     secrets: List[str] = []
-    if is_card_action and getattr(service, "verification_token", None):
-        secrets.append(service.verification_token)
-    if is_encrypted_body and getattr(service, "encrypt_key", None):
+    # 飞书新版事件/回调签名使用 Encrypt Key；旧版卡片回调可能仍使用 Verification Token。
+    if getattr(service, "encrypt_key", None):
         secrets.append(service.encrypt_key)
     if getattr(service, "verification_token", None) and service.verification_token not in secrets:
         secrets.append(service.verification_token)
