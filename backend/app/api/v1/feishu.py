@@ -11,7 +11,7 @@ from fastapi import APIRouter, Body, HTTPException, Query, Request, Depends
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from app.config import Config
 from app.services.feishu_service import feishu_service
 from app.services.feishu_app_service import FeishuAppService
@@ -2353,7 +2353,7 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
     try:
         from app.services.user_service import UserService
         from app.services.request_service import RequestService
-        from app.models.domain import RegAccount, DnsAccount
+        from app.models.domain import Domain, RegAccount, DnsAccount
 
         user_svc = UserService(db)
         req_svc = RequestService(db)
@@ -2383,6 +2383,14 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
             return {"toast": {"type": "info", "content": "已拒绝该申请"}}
 
         if req.type == "domain_register":
+            existing_domain = db.query(Domain).filter(Domain.name == req.domain_name).first()
+            if existing_domain:
+                return _finalize_doc_request_action_failed(
+                    req,
+                    applicant,
+                    reviewer,
+                    f"{req.domain_name} 已在系统域名列表中，已阻止重复购买",
+                )
             account_id = _resolve_reg_account_id(form_values, req)
             if not account_id:
                 return _notify_doc_request_action_failed(req, applicant, reviewer, "请选择注册厂商账号")
@@ -2399,11 +2407,11 @@ async def _process_doc_request_card_action(card_action: str, value: dict, form_v
                     f"所选服务商查价失败：{selected_quote.get('message') or '检查失败'}",
                 )
             if selected_quote.get("check_successful") and selected_quote.get("available") is False:
-                return _notify_doc_request_action_failed(
+                return _finalize_doc_request_action_failed(
                     req,
                     applicant,
                     reviewer,
-                    f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}",
+                    f"所选服务商显示该域名不可注册：{selected_quote.get('message') or '不可注册'}，已阻止购买",
                 )
             req.selected_reg_account_id = account.id
             req.selected_registrar_code = account.registrar_code
@@ -2532,6 +2540,31 @@ def _notify_doc_request_action_failed(req, applicant, reviewer, reason: str) -> 
     return {"toast": {"type": "error", "content": reason}}
 
 
+def _finalize_doc_request_action_failed(req, applicant, reviewer, reason: str) -> dict:
+    """不可重试的审批失败：写入终态、移除原卡片操作按钮，并通知申请人与审批人。"""
+    from datetime import datetime
+
+    session = object_session(req)
+    req.status = "failed"
+    req.error_message = reason
+    if reviewer:
+        req.approver_id = getattr(reviewer, "id", None)
+        req.approver_name = getattr(reviewer, "name", None)
+    req.approved_at = datetime.now()
+    if session:
+        session.commit()
+        session.refresh(req)
+
+    _update_request_approval_card_failed(req, applicant, reviewer, reason)
+    _notify_doc_request_terminal_failed(req, applicant, reviewer, reason)
+    logging.getLogger(__name__).warning(
+        "业务审批终态失败: request_id=%s reason=%s",
+        getattr(req, "id", None),
+        reason,
+    )
+    return {"toast": {"type": "error", "content": reason}}
+
+
 def _expire_request_approval_if_needed(req_svc, req, applicant, reviewer) -> Optional[dict]:
     from app.services.request_service import REQUEST_APPROVAL_TIMEOUT_REASON
 
@@ -2579,6 +2612,87 @@ def _update_request_approval_card_rejected(req, applicant, reviewer, reason: str
     except Exception:
         import logging
         logging.getLogger(__name__).warning("更新业务审批拒绝卡片异常: request_id=%s", req.id, exc_info=True)
+
+
+def _update_request_approval_card_failed(req, applicant, reviewer, reason: str) -> None:
+    message_id = getattr(req, "feishu_message_id", None)
+    if not message_id:
+        return
+    label = "域名购买申请" if req.type == "domain_register" else "DNS 解析申请"
+    body = (
+        f"**状态**：已阻止执行\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**审批人**：{getattr(reviewer, 'name', '未知')}\n"
+        f"**处理时间**：{_format_card_time(getattr(req, 'approved_at', None))}\n"
+        f"**失败原因**：{reason}"
+    )
+    card = {
+        "config": {"wide_screen_mode": True, "update_multi": True},
+        "header": {
+            "title": {"tag": "plain_text", "content": f"⛔ 已阻止：{label}"},
+            "template": "red",
+        },
+        "elements": [
+            {"tag": "div", "text": {"tag": "lark_md", "content": body}},
+            {
+                "tag": "note",
+                "elements": [{"tag": "plain_text", "content": "原审批按钮已移除，重复点击不会再次执行。"}],
+            },
+        ],
+    }
+    try:
+        session = object_session(req)
+        service = get_feishu_service_for_user(session, reviewer) if session and reviewer else feishu_service
+        result = service.update_card_message(message_id, card)
+        if result.get("code") != 0:
+            logging.getLogger(__name__).warning(
+                "更新业务审批失败卡片失败: request_id=%s result=%s",
+                req.id,
+                result,
+            )
+    except Exception:
+        logging.getLogger(__name__).warning("更新业务审批失败卡片异常: request_id=%s", req.id, exc_info=True)
+
+
+def _notify_doc_request_terminal_failed(req, applicant, reviewer, reason: str) -> None:
+    label = "域名购买" if req.type == "domain_register" else "DNS 解析"
+    content = (
+        f"**状态**：已阻止执行\n"
+        f"**域名**：{req.domain_name}\n"
+        f"**申请人**：{getattr(applicant, 'name', req.requester_name)}\n"
+        f"**审批人**：{getattr(reviewer, 'name', '未知')}\n"
+        f"**失败原因**：{reason}\n\n"
+        "该申请已结束，不会继续购买或执行。"
+    )
+    targets = []
+    if reviewer:
+        targets.append(reviewer)
+    if applicant and (not reviewer or getattr(applicant, "id", None) != getattr(reviewer, "id", None)):
+        targets.append(applicant)
+    for user in targets:
+        receive_id = getattr(user, "feishu_open_id", None) or getattr(user, "feishu_user_id", None)
+        if not receive_id:
+            continue
+        receive_type = "open_id" if getattr(user, "feishu_open_id", None) else "user_id"
+        try:
+            _feishu_service_for_user_object(user).send_card_message(receive_id, {
+                "config": {"wide_screen_mode": True},
+                "header": {
+                    "title": {"tag": "plain_text", "content": f"⛔ {label}已阻止执行"},
+                    "template": "red",
+                },
+                "elements": [
+                    {"tag": "div", "text": {"tag": "lark_md", "content": content}},
+                ],
+            }, receive_type)
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "发送业务终态失败通知失败: request_id=%s user_id=%s",
+                getattr(req, "id", None),
+                getattr(user, "id", None),
+                exc_info=True,
+            )
 
 
 def _update_request_approval_card_processing(req, applicant, reviewer) -> None:

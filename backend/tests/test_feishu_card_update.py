@@ -13,6 +13,7 @@ from app.api.v1.feishu import (
     _build_request_submitted_card,
     _handle_card_action,
     _handle_doc_request_card_action,
+    _finalize_doc_request_action_failed,
     _is_direct_register_form_expired,
     _verify_feishu_callback_security,
     _resolve_direct_reg_account_id,
@@ -266,6 +267,33 @@ def test_card_action_handles_legacy_root_action_and_json_value(monkeypatch):
     assert captured["args"][1] == {"action": "approve_doc_request", "request_id": "req-legacy"}
     assert captured["args"][2] == {"selected_reg_account_id": {"value": "1"}}
     assert captured["args"][3]["open_id"] == "ou_reviewer"
+
+
+def test_terminal_doc_action_failure_marks_request_failed(monkeypatch):
+    monkeypatch.setattr("app.api.v1.feishu._update_request_approval_card_failed", lambda *args, **kwargs: None)
+    monkeypatch.setattr("app.api.v1.feishu._notify_doc_request_terminal_failed", lambda *args, **kwargs: None)
+    req = SimpleNamespace(
+        id="req-duplicate",
+        type="domain_register",
+        status="pending",
+        domain_name="example.com",
+        requester_name="申请人",
+        error_message=None,
+        approver_id=None,
+        approver_name=None,
+        approved_at=None,
+    )
+    applicant = SimpleNamespace(id=1, name="申请人")
+    reviewer = SimpleNamespace(id=2, name="审批人")
+
+    result = _finalize_doc_request_action_failed(req, applicant, reviewer, "已阻止重复购买")
+
+    assert result["toast"]["type"] == "error"
+    assert req.status == "failed"
+    assert req.error_message == "已阻止重复购买"
+    assert req.approver_id == 2
+    assert req.approver_name == "审批人"
+    assert req.approved_at is not None
 
 
 def test_domain_register_account_falls_back_to_request_default():
