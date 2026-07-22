@@ -47,6 +47,11 @@ class Config:
         for item in os.getenv("BACKEND_DNS_JINAN_APPLICANT_MATCHERS", "\u6d4e\u5357").split(",")
         if item.strip()
     ]
+    BACKEND_DNS_JINAN_APP_CODES = [
+        item.strip().lower()
+        for item in os.getenv("BACKEND_DNS_JINAN_APP_CODES", "jinan").split(",")
+        if item.strip()
+    ]
 
     # --------------------------------------------------------------------------
     # Cloudflare 配置

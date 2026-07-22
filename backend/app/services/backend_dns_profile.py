@@ -39,6 +39,18 @@ def known_backend_hostnames() -> set[str]:
 def _matches_jinan_applicant(applicant: Any = None) -> bool:
     if not applicant:
         return False
+
+    # Application ownership is the primary signal for multi-Feishu routing.
+    feishu_app = getattr(applicant, "feishu_app", None)
+    app_code = str(getattr(feishu_app, "code", "") or "").strip().lower()
+    jinan_app_codes = {
+        str(item).strip().lower()
+        for item in getattr(Config, "BACKEND_DNS_JINAN_APP_CODES", [])
+        if item
+    }
+    if app_code and app_code in jinan_app_codes:
+        return True
+
     matchers = [item.lower() for item in Config.BACKEND_DNS_JINAN_APPLICANT_MATCHERS if item]
     if not matchers:
         return False
