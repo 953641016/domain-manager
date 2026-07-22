@@ -296,6 +296,19 @@ def _self_check_reg_account(service: DomainService, account: RegAccount) -> dict
         "success": check_success,
         "message": quote.get("message") or ("接口可访问" if check_success else "检查失败"),
     })
+
+    registration_permission = None
+    if decrypted.registrar_code == "cloudflare" and hasattr(adapter, "check_registration_permission"):
+        registration_permission = adapter.check_registration_permission()
+        checks.append({
+            "name": "Cloudflare 注册写权限",
+            "success": bool(registration_permission.get("success")),
+            "message": registration_permission.get("message") or "注册写权限检测失败",
+        })
+
+    self_check_success = check_success and (
+        registration_permission is None or bool(registration_permission.get("success"))
+    )
     details.update({
         "test_domain": quote.get("domain") or "example-test-20260603-domain.com",
         "available": quote.get("available"),
@@ -303,11 +316,25 @@ def _self_check_reg_account(service: DomainService, account: RegAccount) -> dict
         "currency": quote.get("currency"),
         "provider_message": quote.get("message"),
     })
+    if registration_permission is not None:
+        details.update({
+            "registration_permission_status": registration_permission.get("status"),
+            "registration_permission_verified": registration_permission.get("verified"),
+            "registration_permission_probe_domain": registration_permission.get("probe_domain"),
+        })
 
     return {
-        "success": check_success,
-        "status": "ok" if check_success else "failed",
-        "message": "注册账号自检通过" if check_success else (quote.get("message") or "注册账号自检失败"),
+        "success": self_check_success,
+        "status": "ok" if self_check_success else "failed",
+        "message": (
+            "注册账号自检通过（查价与注册写权限均通过）"
+            if self_check_success
+            else (
+                registration_permission.get("message")
+                if registration_permission is not None and not registration_permission.get("success")
+                else (quote.get("message") or "注册账号自检失败")
+            )
+        ),
         "checks": checks,
         "details": details,
     }

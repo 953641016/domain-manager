@@ -235,6 +235,81 @@ class CloudflareRegistrarAdapter(BaseRegistrarAdapter):
                 "check_successful": False
             }
 
+    def check_registration_permission(self) -> Dict[str, Any]:
+        """检查 Registrar 写权限，不使用可购买域名。"""
+        # example.com is reserved and cannot be registered. The API call is
+        # used only to distinguish authentication failures from other checks.
+        probe_domain = "example.com"
+        url = f"{self.base_url}/accounts/{self.account_id}/registrar/registrations"
+        payload = {"domain_name": probe_domain}
+
+        try:
+            response = requests.post(
+                url,
+                headers={**self._get_headers(), "Prefer": "respond-async"},
+                json=payload,
+                timeout=self.timeout,
+            )
+            data = response.json()
+
+            if data.get("success"):
+                return {
+                    "success": False,
+                    "status": "unexpected_success",
+                    "verified": False,
+                    "probe_domain": probe_domain,
+                    "message": "注册权限探测请求意外被接受，请勿继续重试并立即检查 Cloudflare 注册状态",
+                }
+
+            errors = data.get("errors") or []
+            error_text = self._format_cloudflare_errors(errors, "Cloudflare 拒绝了注册权限探测请求")
+            auth_error = any(
+                str(error.get("code")) == "10000"
+                and str(error.get("message", "")).lower() == "authentication error"
+                for error in errors
+                if isinstance(error, dict)
+            )
+            if auth_error:
+                return {
+                    "success": False,
+                    "status": "permission_denied",
+                    "verified": True,
+                    "probe_domain": probe_domain,
+                    "message": f"Cloudflare 注册写权限不足: {error_text}",
+                }
+
+            return {
+                "success": True,
+                "status": "verified",
+                "verified": True,
+                "probe_domain": probe_domain,
+                "message": f"注册接口鉴权已通过；探测域名未成交: {error_text}",
+            }
+        except requests.exceptions.Timeout as e:
+            return {
+                "success": False,
+                "status": "unknown",
+                "verified": False,
+                "probe_domain": probe_domain,
+                "message": f"注册写权限暂时无法判断，Cloudflare 请求超时: {e}",
+            }
+        except requests.exceptions.RequestException as e:
+            return {
+                "success": False,
+                "status": "unknown",
+                "verified": False,
+                "probe_domain": probe_domain,
+                "message": f"注册写权限暂时无法判断: {e}",
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "status": "unknown",
+                "verified": False,
+                "probe_domain": probe_domain,
+                "message": f"注册写权限检测出错: {e}",
+            }
+
     def register_domain(
         self,
         domain: str,
