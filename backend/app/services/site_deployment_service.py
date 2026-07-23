@@ -8,6 +8,7 @@ import requests
 from app.config import Config
 from app.services.backend_dns_profile import known_backend_hostnames, resolve_backend_dns_profile
 from app.services.feishu_doc_parser import FeishuDocParser
+from app.services.feishu_service import FeishuService
 
 
 DOMAIN_RE = re.compile(
@@ -246,12 +247,16 @@ class SiteDeploymentService:
             result.append(package)
         return result
 
-    def parse_payment_config(self, doc_url: Optional[str]) -> dict[str, Any]:
+    def parse_payment_config(
+        self,
+        doc_url: Optional[str],
+        feishu_service: Optional[FeishuService] = None,
+    ) -> dict[str, Any]:
         if not doc_url:
             return {"free_score": None, "package_list": [], "source": "empty"}
 
         try:
-            parser = FeishuDocParser()
+            parser = FeishuDocParser(service=feishu_service) if feishu_service else FeishuDocParser()
             doc_token = parser.resolve_doc_token(doc_url)
             content = parser.get_raw_content(doc_token)
 
@@ -295,6 +300,7 @@ class SiteDeploymentService:
         domain: Optional[str],
         doc_url: Optional[str],
         applicant: Any = None,
+        feishu_service: Optional[FeishuService] = None,
     ) -> tuple[str, dict[str, Any]]:
         profile = resolve_backend_dns_profile(applicant)
         if domain and domain.strip():
@@ -309,7 +315,7 @@ class SiteDeploymentService:
         if not doc_url or not doc_url.strip():
             raise ValueError("domain or doc_url is required")
 
-        parser = FeishuDocParser()
+        parser = FeishuDocParser(service=feishu_service) if feishu_service else FeishuDocParser()
         doc_token = parser.resolve_doc_token(doc_url)
         title = parser.get_document_title(doc_token)
         content = parser.get_raw_content(doc_token)
@@ -486,10 +492,16 @@ class SiteDeploymentService:
         appid: Optional[str] = None,
         authors: Optional[list[str]] = None,
         applicant: Any = None,
+        feishu_service: Optional[FeishuService] = None,
         timeout_seconds: Optional[int] = None,
         poll_interval_seconds: Optional[float] = None,
     ) -> dict[str, Any]:
-        service_domain, resolution = self.resolve_service_domain(domain, doc_url, applicant=applicant)
+        service_domain, resolution = self.resolve_service_domain(
+            domain,
+            doc_url,
+            applicant=applicant,
+            feishu_service=feishu_service,
+        )
         base_domain = str(
             resolution.get("base_domain")
             or self.to_base_domain(
@@ -497,7 +509,7 @@ class SiteDeploymentService:
                 service_hostname=str(resolution.get("backend_dns_hostname") or ""),
             )
         )
-        payment_config = self.parse_payment_config(doc_url)
+        payment_config = self.parse_payment_config(doc_url, feishu_service=feishu_service)
         post_payload = self.build_post_deploy_payload(
             base_domain=base_domain,
             service_domain=service_domain,

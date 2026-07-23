@@ -17,7 +17,7 @@ class FeishuBot:
             "你好": self.handle_hello,
         }
     
-    async def handle_message(self, event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    async def handle_message(self, event: Dict[str, Any], service=None) -> Optional[Dict[str, Any]]:
         """
         处理收到的消息
         
@@ -52,7 +52,7 @@ class FeishuBot:
         
         if response:
             # 发送响应消息
-            feishu_service.send_text_message(
+            (service or feishu_service).send_text_message(
                 receive_id=sender_id,
                 content=response,
                 receive_id_type="open_id"

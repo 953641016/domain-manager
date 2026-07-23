@@ -12,6 +12,7 @@ import requests
 
 from app.config import Config
 from app.services.backend_dns_profile import BackendDnsProfile
+from app.services.feishu_service import FeishuService
 
 
 ACTION_LABELS = {
@@ -49,10 +50,11 @@ class ParsedDocRequest:
 class FeishuDocParser:
     """读取飞书 docx 并提取域名/DNS 申请数据。"""
 
-    def __init__(self):
+    def __init__(self, service: Optional[FeishuService] = None):
         self.base_url = "https://open.feishu.cn"
-        self.app_id = Config.FEISHU_APP_ID
-        self.app_secret = Config.FEISHU_APP_SECRET
+        self.feishu_service = service or FeishuService()
+        self.app_id = self.feishu_service.app_id
+        self.app_secret = self.feishu_service.app_secret
         self._tenant_token: Optional[str] = None
 
     def parse(
@@ -287,7 +289,10 @@ class FeishuDocParser:
             return self._tenant_token
         response = requests.post(
             f"{self.base_url}/open-apis/auth/v3/tenant_access_token/internal",
-            json={"app_id": self.app_id, "app_secret": self.app_secret},
+            json={
+                "app_id": self.feishu_service.app_id,
+                "app_secret": self.feishu_service.app_secret,
+            },
             timeout=15,
         )
         payload = response.json()

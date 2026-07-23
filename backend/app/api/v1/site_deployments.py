@@ -14,6 +14,7 @@ from app.config import Config
 from app.core.database import get_db
 from app.services.audit_service import AuditService
 from app.services.site_deployment_service import SiteDeploymentError, SiteDeploymentService
+from app.services.feishu_app_service import get_feishu_service_for_user
 from app.services.user_service import UserService
 
 router = APIRouter(prefix="/site-deployments", tags=["Site deployments"])
@@ -88,6 +89,7 @@ def deploy_site(
             appid=data.appid.strip() if data.appid else None,
             authors=data.authors,
             applicant=applicant,
+            feishu_service=get_feishu_service_for_user(db, applicant),
             timeout_seconds=data.timeout_seconds,
             poll_interval_seconds=data.poll_interval_seconds,
         )

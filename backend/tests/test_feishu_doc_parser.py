@@ -138,6 +138,37 @@ def test_parse_metadata_does_not_require_dns_records(monkeypatch):
     assert parsed.raw_sections == {"metadata_only": True}
 
 
+def test_parser_uses_injected_feishu_app_credentials(monkeypatch):
+    class FakeService:
+        app_id = "cli-jinan"
+        app_secret = "jinan-secret"
+
+    calls = []
+
+    class FakeResponse:
+        def json(self):
+            return {"code": 0, "tenant_access_token": "jinan-tenant-token"}
+
+    def fake_post(url, **kwargs):
+        calls.append((url, kwargs))
+        return FakeResponse()
+
+    monkeypatch.setattr("app.services.feishu_doc_parser.requests.post", fake_post)
+
+    parser = FeishuDocParser(service=FakeService())
+
+    assert parser._tenant_access_token() == "jinan-tenant-token"
+    assert calls == [
+        (
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            {
+                "json": {"app_id": "cli-jinan", "app_secret": "jinan-secret"},
+                "timeout": 15,
+            },
+        )
+    ]
+
+
 def test_parse_backend_dns_uses_jinan_profile_without_backend_section(monkeypatch):
     parser = FeishuDocParser()
     monkeypatch.setattr(parser, "resolve_doc_token", lambda doc_url: "doc_token")

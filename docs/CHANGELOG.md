@@ -38,6 +38,7 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **飞书文档按应用隔离凭证**（`backend/app/services/feishu_doc_parser.py`、`backend/app/api/v1/feishu.py`、`backend/app/services/site_deployment_service.py`）：文档读取、站点部署解析、Bitable 读取、审批卡片更新和机器人回复按申请人或回调所属飞书应用选择凭证，避免济南等非默认应用读取文档时出现 `forbidden`；通用发送接口和自动化表格请求支持显式传入 `feishu_app_id`。
 - **已注册域名重复购买拦截提示**（`backend/app/api/v1/feishu.py`）：域名购买审批时，若域名已存在于系统域名列表或服务商明确返回不可注册，申请会直接进入 `failed` 终态并回写原审批卡片为“已阻止执行”，不再保持待审批并提示“修正后重试”，避免测试已购域名时误以为仍可继续购买。
 - **飞书卡片回调在线状态误判**（`backend/app/api/v1/feishu.py`）：卡片交互回调除兼容请求体 `token` 外，新增基于 Encrypt Key 的 `X-Lark-Request-Timestamp`、`X-Lark-Request-Nonce`、`X-Lark-Signature` 请求头签名校验，避免新版 `card.action.trigger` 回调未携带 body token 时被后端 403，导致飞书客户端提示“目标回调服务当前未在线”。
 - **域名购买直传域名不再强依赖文档链接**（`backend/app/api/v1/feishu.py`）：`domain_purchase` 传入 `register_domain` 时不再要求 `doc_url`，也不再解析文档 token，避免飞书多维表格只传域名或来源链接格式异常时返回 400；卡片无来源文档时显示“未提供”。

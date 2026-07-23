@@ -221,14 +221,17 @@ async def search_feishu_users(
 
 @router.get("/user/{user_id}")
 async def get_user_by_id(
-    user_id: str
+    user_id: str,
+    feishu_app_id: Optional[int] = Query(None),
+    db: Session = Depends(get_db),
 ):
     """
     通过飞书用户ID获取用户详情
     用于已知道用户ID时获取信息
     """
     try:
-        user_data = feishu_service.get_user_by_user_id(user_id)
+        service = FeishuAppService(db).get_service(app_id=feishu_app_id)
+        user_data = service.get_user_by_user_id(user_id)
         
         if not user_data:
             raise HTTPException(status_code=404, detail="用户不存在")
@@ -296,7 +299,7 @@ async def feishu_webhook(request: Request, app_code: Optional[str] = None, db: S
         # 处理其他事件
         if event_type == "im.message.receive_v1":
             event = request_body.get("event", {})
-            await feishu_bot.handle_message(event)
+            await feishu_bot.handle_message(event, current_feishu_service)
             return {"success": True, "message": "消息已接收"}
 
         if event_type == "application.bot.menu_v6":
@@ -356,15 +359,17 @@ class SendMessageRequest(BaseModel):
     receive_id: str
     content: str
     receive_id_type: str = "open_id"
+    feishu_app_id: Optional[int] = None
 
 
 @router.post("/send-message")
-async def send_message(request: SendMessageRequest):
+async def send_message(request: SendMessageRequest, db: Session = Depends(get_db)):
     """
     发送飞书消息接口
     """
     try:
-        result = feishu_service.send_text_message(
+        service = FeishuAppService(db).get_service(app_id=request.feishu_app_id)
+        result = service.send_text_message(
             receive_id=request.receive_id,
             content=request.content,
             receive_id_type=request.receive_id_type
@@ -389,15 +394,17 @@ class SendCardRequest(BaseModel):
     receive_id: str
     card_content: Dict[str, Any]
     receive_id_type: str = "open_id"
+    feishu_app_id: Optional[int] = None
 
 
 @router.post("/send-card")
-async def send_card(request: SendCardRequest):
+async def send_card(request: SendCardRequest, db: Session = Depends(get_db)):
     """
     发送飞书交互式卡片接口
     """
     try:
-        result = feishu_service.send_card_message(
+        service = FeishuAppService(db).get_service(app_id=request.feishu_app_id)
+        result = service.send_card_message(
             receive_id=request.receive_id,
             card_content=request.card_content,
             receive_id_type=request.receive_id_type
@@ -562,17 +569,19 @@ def submit_doc_button_request(
                 records=[],
                 raw_sections={"domain_source": "request_param"},
             )
-        elif gsc_verification_override:
-            parsed = FeishuDocParser().parse_metadata(body.doc_url, body.action, body.doc_format)
-            parsed.records = [_build_gsc_verification_record(gsc_verification_override)]
-            parsed.raw_sections = {"gsc_source": "request_param"}
         else:
-            parsed = FeishuDocParser().parse(
-                body.doc_url,
-                body.action,
-                body.doc_format,
-                backend_profile=resolve_backend_dns_profile(applicant),
-            )
+            parser = FeishuDocParser(service=get_feishu_service_for_user(db, applicant))
+            if gsc_verification_override:
+                parsed = parser.parse_metadata(body.doc_url, body.action, body.doc_format)
+                parsed.records = [_build_gsc_verification_record(gsc_verification_override)]
+                parsed.raw_sections = {"gsc_source": "request_param"}
+            else:
+                parsed = parser.parse(
+                    body.doc_url,
+                    body.action,
+                    body.doc_format,
+                    backend_profile=resolve_backend_dns_profile(applicant),
+                )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1569,7 +1578,10 @@ def get_confirm_data(
 
     # 读取 Bitable 记录
     try:
-        raw_rows = feishu_service.read_bitable_records(cfg.app_token, cfg.table_id)
+        raw_rows = get_feishu_service_for_user(db, current_user).read_bitable_records(
+            cfg.app_token,
+            cfg.table_id,
+        )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"读取多维表格失败：{e}")
 
@@ -1624,7 +1636,7 @@ def bind_bitable(
 
     # 验证可访问性
     try:
-        feishu_service.read_bitable_records(app_token, table_id)
+        get_feishu_service_for_user(db, current_user).read_bitable_records(app_token, table_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"无法访问该多维表格，请检查应用权限：{e}")
 
@@ -1713,7 +1725,7 @@ def submit_request(
         receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
         if receive_id:
             if req_type == "dns_record":
-                send_result = feishu_service.send_dns_approval_card(
+                send_result = get_feishu_service_for_user(db, specialist).send_dns_approval_card(
                     receive_id=receive_id,
                     request_id=req.id,
                     requester_name=current_user.name,
@@ -1752,6 +1764,7 @@ class TableRequestBody(BaseModel):
     table_id: str                # 具体哪张表
     dns_provider: str            # 解析平台，写死在自动化配置里，如 "vercel"
     domain: str                  # 域名，写死在自动化配置里，如 "krea2.net"
+    feishu_app_id: Optional[int] = None
 
 
 @router.post("/table-request")
@@ -1772,7 +1785,10 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
     user_svc = UserService(db)
 
     # 用 feishu_user_id 或 open_id 找用户
-    user = user_svc.get_user_by_feishu_userid(body.feishu_user_id)
+    user = user_svc.get_user_by_feishu_userid(
+        body.feishu_user_id,
+        feishu_app_id=body.feishu_app_id,
+    )
     if not user or not user.is_active:
         raise HTTPException(status_code=403, detail="用户不存在或已禁用，请联系管理员")
 
@@ -1780,7 +1796,8 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
         raise HTTPException(status_code=403, detail="您尚未分配归属专员，无法提交申请，请联系管理员")
 
     # 读取 Bitable 所有记录
-    raw_rows = feishu_service.read_bitable_records(body.app_token, body.table_id)
+    user_feishu_service = get_feishu_service_for_user(db, user)
+    raw_rows = user_feishu_service.read_bitable_records(body.app_token, body.table_id)
 
     # 过滤：去掉空行和专用提交行（Hostname 为空或仅含"—"）
     records = []
@@ -1818,7 +1835,7 @@ async def feishu_table_request(body: TableRequestBody, db: Session = Depends(get
         receive_id = getattr(specialist, "feishu_open_id", None) or getattr(specialist, "feishu_user_id", None)
         receive_type = "open_id" if getattr(specialist, "feishu_open_id", None) else "user_id"
         if receive_id:
-            send_result = feishu_service.send_dns_approval_card(
+            send_result = get_feishu_service_for_user(db, specialist).send_dns_approval_card(
                 receive_id=receive_id,
                 request_id=req.id,
                 requester_name=user.name,
@@ -2605,7 +2622,9 @@ def _update_request_approval_card_rejected(req, applicant, reviewer, reason: str
         ],
     }
     try:
-        result = feishu_service.update_card_message(message_id, card)
+        session = object_session(req)
+        service = get_feishu_service_for_user(session, reviewer) if session and reviewer else feishu_service
+        result = service.update_card_message(message_id, card)
         if result.get("code") != 0:
             import logging
             logging.getLogger(__name__).warning("更新业务审批拒绝卡片失败: request_id=%s result=%s", req.id, result)
@@ -2722,7 +2741,9 @@ def _update_request_approval_card_processing(req, applicant, reviewer) -> None:
         ],
     }
     try:
-        result = feishu_service.update_card_message(message_id, card)
+        session = object_session(req)
+        service = get_feishu_service_for_user(session, reviewer) if session and reviewer else feishu_service
+        result = service.update_card_message(message_id, card)
         if result.get("code") != 0:
             import logging
             logging.getLogger(__name__).warning("更新业务审批处理中卡片失败: request_id=%s result=%s", req.id, result)
