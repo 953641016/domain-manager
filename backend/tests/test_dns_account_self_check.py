@@ -14,7 +14,7 @@ class FakeResponse:
 def make_service(provider_code):
     decrypted = SimpleNamespace(
         provider_code=provider_code,
-        api_key="test-token",
+        api_key="cfat_test-token" if provider_code == "cloudflare" else "test-token",
         api_secret="test-secret",
     )
     service = SimpleNamespace(get_dns_account_decrypted=lambda account_id: decrypted)
