@@ -394,16 +394,34 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
             zones_data = zones_resp.json()
         except Exception as e:
             zones_data = {"success": False, "errors": [str(e)]}
-        zones_ok = bool(zones_data.get("success"))
+        zones = zones_data.get("result") or []
+        result_info = zones_data.get("result_info") or {}
+        zone_count = result_info.get("total_count")
+        if zone_count is None:
+            zone_count = len(zones)
+        try:
+            zone_count_value = int(zone_count or 0)
+        except (TypeError, ValueError):
+            zone_count_value = 0
+        zones_ok = bool(zones_data.get("success")) and bool(zones) and zone_count_value > 0
+        zone_message = (
+            "可读取 Zone 列表"
+            if zones_ok
+            else (
+                "Token 有效，但当前账号未读取到任何 Zone；请检查域名是否属于此 Cloudflare 账号，"
+                "以及 Token 的 Zone 资源范围"
+                if zones_data.get("success") and (not zones or zone_count_value <= 0)
+                else _format_provider_error(zones_data, "Zone 读取失败")
+            )
+        )
         checks.append({
             "name": "Zone 读取权限",
             "success": zones_ok,
-            "message": "可读取 Zone 列表" if zones_ok else _format_provider_error(zones_data, "Zone 读取失败"),
+            "message": zone_message,
         })
-        result_info = zones_data.get("result_info") or {}
-        sample_zone = ((zones_data.get("result") or [{}])[0] or {}) if zones_ok else {}
+        sample_zone = (zones[0] or {}) if zones_ok else {}
         details.update({
-            "zone_count": result_info.get("total_count"),
+            "zone_count": zone_count,
             "sample_zone": sample_zone.get("name") if zones_ok else None,
         })
 
@@ -424,14 +442,37 @@ def _self_check_dns_account(service: DomainService, account: DnsAccount) -> dict
                 "success": records_ok,
                 "message": "可读取 DNS 记录" if records_ok else _format_provider_error(records_data, "DNS 记录读取失败"),
             })
+        elif zones_ok:
+            checks.append({
+                "name": "DNS 记录读取权限",
+                "success": False,
+                "message": "Zone 列表中缺少有效 Zone ID，无法验证 DNS 记录读取权限",
+            })
     elif decrypted.provider_code == "dnspod":
         try:
             adapter = RegistrarFactory.create_dns_provider("dnspod", decrypted.api_key, decrypted.api_secret)
             resp = adapter._request("DescribeDomainList", {"Type": "1", "Offset": 0, "Limit": 1})
-            checks.append({"name": "域名列表读取权限", "success": True, "message": "可读取 DNSPod 域名列表"})
+            domain_list = (resp.get("DomainList") or []) if isinstance(resp, dict) else []
+            domain_count = resp.get("DomainCountInfo", {}).get("Total") if isinstance(resp, dict) else None
+            if domain_count is None:
+                domain_count = len(domain_list)
+            try:
+                domain_count_value = int(domain_count or 0)
+            except (TypeError, ValueError):
+                domain_count_value = 0
+            domain_count_ok = domain_count_value > 0 and bool(domain_list)
+            checks.append({
+                "name": "域名列表读取权限",
+                "success": domain_count_ok,
+                "message": (
+                    "可读取 DNSPod 域名列表"
+                    if domain_count_ok
+                    else "凭证有效，但当前账号未读取到任何域名；请检查账号权限或域名归属"
+                ),
+            })
             details.update({
-                "domain_count": resp.get("DomainCountInfo", {}).get("Total") if isinstance(resp, dict) else None,
-                "sample_domain": ((resp.get("DomainList") or [{}])[0] or {}).get("Name") if isinstance(resp, dict) else None,
+                "domain_count": domain_count,
+                "sample_domain": (domain_list[0] or {}).get("Name") if domain_list else None,
             })
         except Exception as e:
             checks.append({"name": "域名列表读取权限", "success": False, "message": str(e)})
