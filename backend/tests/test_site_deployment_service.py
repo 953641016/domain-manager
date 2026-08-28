@@ -190,4 +190,3 @@ def test_deploy_and_notify_waits_and_skips_post_api(monkeypatch):
     assert calls[0][0] == "post"
     assert calls[1][0] == "get"
     assert len(calls) == 2
-    assert calls[2][0] == "post"

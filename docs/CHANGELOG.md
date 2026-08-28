@@ -9,6 +9,7 @@
 ## [未发布]
 
 ### 新增
+- **后端解析成功后自动站点部署**（`backend/app/services/execution_service.py`）：DNS 执行流程识别 `backend_dns`、旧版 `api_domain` 和 `provider_section=backend` 的后端 A 记录；记录成功或已存在一致后等待公网解析到目标 IP，再内部调用站点部署逻辑，并在飞书执行结果卡片展示站点部署状态。
 - **申请人分组后台域名规则**（`backend/app/services/backend_dns_profile.py`、`backend/app/services/execution_service.py`、`backend/app/services/feishu_doc_parser.py`、`backend/app/services/site_deployment_service.py`、`backend/app/api/v1/feishu.py`）：后端接口域名解析支持按申请人匹配不同后台 profile；默认仍生成 `svc.{domain}` 指向 `BACKEND_DNS_DEFAULT_TARGET`，申请人信息命中“济南”时生成 `art.{domain}` 指向 `20.9.240.31`，飞书文档按钮和站点部署 API 的 `api_url` 同步使用该规则。
 - **多飞书应用支持**（`backend/app/models/feishu_app.py`、`backend/app/api/v1/feishu.py`、`frontend/src/pages/Login.tsx`、`frontend/src/pages/config/UserManagement.tsx`）：新增飞书应用配置表和管理脚本，用户按飞书应用归属；登录、扫码添加人员、用户搜索、飞书回调和通知发送均支持选择对应飞书应用，兼容原默认应用。
 - **GSC 认证值直传参数**（`backend/app/api/v1/feishu.py`、`backend/app/services/feishu_doc_parser.py`）：飞书文档按钮 `gsc_dns` 支持可选 `gsc_verification` 参数；传入 `google-site-verification=...` 时直接生成根域 TXT 认证记录，为空或不传时继续从飞书文档解析。

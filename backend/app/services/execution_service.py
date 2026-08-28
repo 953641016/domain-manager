@@ -8,12 +8,15 @@
 """
 import json
 import logging
+import socket
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from app.config import Config
 from app.core.database import SessionLocal
 from app.models.request import Request
 from app.models.domain import Domain
@@ -31,6 +34,7 @@ TYPE_LABELS = {
     "domain_register": "域名注册",
     "dns_record": "DNS解析",
 }
+BACKEND_DNS_PROVIDER_KEYS = {"backend_dns", "api_domain"}
 
 
 class ExecutionService:
@@ -198,10 +202,13 @@ class ExecutionService:
         ok = sum(1 for x in results if x["status"] in ("success", "skipped"))
         total = len(results)
         success = ok == total and total > 0
+        site_deployment = None
+        if self._is_backend_dns_request(request):
+            site_deployment = self._maybe_deploy_site_after_backend_dns(request, results)
         if success:
             self._upsert_domain_dns_mapping(request, account, provider_code)
         failure_message = None if success else self._summarize_failure({"records": results})
-        return {
+        response = {
             "success": success,
             "total": total,
             "success_count": ok,
@@ -211,6 +218,9 @@ class ExecutionService:
             "provider_code": provider_code,
             **({"error": failure_message} if failure_message else {}),
         }
+        if site_deployment is not None:
+            response["site_deployment"] = site_deployment
+        return response
 
     def _upsert_domain_dns_mapping(self, request: Request, account, provider_code: str) -> None:
         """DNS 执行成功后回填本地域名 → DNS账号映射，供后台审批自动匹配。"""
@@ -495,12 +505,167 @@ class ExecutionService:
     @staticmethod
     def _is_backend_dns_request(request: Request) -> bool:
         data = request.request_data or {}
-        if data.get("action") == "backend_dns":
+        if str(data.get("action") or "").strip() in BACKEND_DNS_PROVIDER_KEYS:
+            return True
+        if str(data.get("dns_provider") or "").strip() in BACKEND_DNS_PROVIDER_KEYS:
             return True
         for record in data.get("records") or []:
             if record.get("provider_section") == "backend":
                 return True
         return False
+
+    @staticmethod
+    def _execution_record_matches(source_record: Dict[str, Any], result_item: Dict[str, Any]) -> bool:
+        rec = result_item.get("record") or {}
+        source_host = str(source_record.get("hostname") or source_record.get("host") or source_record.get("name") or "").strip().lower().rstrip(".")
+        source_type = str(source_record.get("type") or source_record.get("record_type") or "").strip().upper()
+        source_target = str(source_record.get("target") or source_record.get("value") or source_record.get("content") or "").strip()
+        result_host = str(rec.get("host") or rec.get("hostname") or rec.get("name") or "").strip().lower().rstrip(".")
+        result_type = str(rec.get("type") or rec.get("record_type") or "").strip().upper()
+        result_target = str(rec.get("value") or rec.get("target") or rec.get("content") or "").strip()
+        return source_host == result_host and source_type == result_type and source_target == result_target
+
+    @classmethod
+    def _backend_dns_record_executed(cls, record: Dict[str, Any], execution_results: Optional[List[Dict[str, Any]]]) -> bool:
+        if execution_results is None:
+            return True
+        for item in execution_results:
+            if not cls._execution_record_matches(record, item):
+                continue
+            return item.get("status") in ("success", "skipped")
+        return False
+
+    @classmethod
+    def _backend_dns_deploy_record(
+        cls,
+        request: Request,
+        execution_results: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[Dict[str, str]]:
+        data = request.request_data or {}
+        is_backend_provider = (
+            str(data.get("action") or "").strip() in BACKEND_DNS_PROVIDER_KEYS
+            or str(data.get("dns_provider") or "").strip() in BACKEND_DNS_PROVIDER_KEYS
+        )
+        for record in data.get("records") or []:
+            if record.get("provider_section") != "backend" and not is_backend_provider:
+                continue
+            rtype = str(record.get("type") or record.get("record_type") or "").strip().upper()
+            if rtype != "A":
+                continue
+            if not cls._backend_dns_record_executed(record, execution_results):
+                continue
+            hostname = str(record.get("hostname") or record.get("host") or record.get("name") or "").strip().lower().rstrip(".")
+            target = str(record.get("target") or record.get("value") or record.get("content") or "").strip()
+            if not hostname or not target:
+                continue
+            if hostname == "@":
+                service_domain = request.domain_name
+            elif hostname.endswith(f".{request.domain_name}"):
+                service_domain = hostname
+            else:
+                service_domain = f"{hostname}.{request.domain_name}"
+            return {
+                "service_domain": service_domain,
+                "hostname": hostname,
+                "target": target,
+            }
+        if (
+            str(data.get("action") or "").strip() in BACKEND_DNS_PROVIDER_KEYS
+            or str(data.get("dns_provider") or "").strip() in BACKEND_DNS_PROVIDER_KEYS
+        ):
+            if execution_results is not None:
+                return None
+            profile = resolve_backend_dns_profile(getattr(request, "requester", None))
+            return {
+                "service_domain": f"{profile.hostname}.{request.domain_name}",
+                "hostname": profile.hostname,
+                "target": profile.target,
+            }
+        return None
+
+    @staticmethod
+    def _resolve_ipv4_records(domain: str) -> List[str]:
+        records = socket.getaddrinfo(domain, 80, family=socket.AF_INET, type=socket.SOCK_STREAM)
+        return sorted({item[4][0] for item in records if item and item[4]})
+
+    def _wait_for_backend_dns_resolution(self, service_domain: str, target: str) -> Dict[str, Any]:
+        timeout_seconds = max(0, int(Config.SITE_DEPLOY_DNS_CHECK_TIMEOUT_SECONDS))
+        interval_seconds = max(1.0, float(Config.SITE_DEPLOY_DNS_CHECK_INTERVAL_SECONDS))
+        deadline = time.monotonic() + timeout_seconds
+        last_records: List[str] = []
+        last_error = ""
+
+        while True:
+            try:
+                last_records = self._resolve_ipv4_records(service_domain)
+                last_error = ""
+                if target in last_records:
+                    return {
+                        "success": True,
+                        "service_domain": service_domain,
+                        "expected_target": target,
+                        "resolved_records": last_records,
+                    }
+            except Exception as exc:
+                last_records = []
+                last_error = str(exc)
+
+            if time.monotonic() >= deadline:
+                return {
+                    "success": False,
+                    "service_domain": service_domain,
+                    "expected_target": target,
+                    "resolved_records": last_records,
+                    "error": last_error or f"DNS did not resolve to {target} within {timeout_seconds} seconds",
+                    "timeout_seconds": timeout_seconds,
+                }
+            time.sleep(interval_seconds)
+
+    def _maybe_deploy_site_after_backend_dns(self, request: Request, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+        if not self._is_backend_dns_request(request):
+            return {"triggered": False, "reason": "not a backend DNS request"}
+        record = self._backend_dns_deploy_record(request, records)
+        if not record:
+            return {"triggered": False, "reason": "backend DNS record not found or not executed successfully"}
+
+        service_domain = record["service_domain"]
+        target = record["target"]
+        dns_check = self._wait_for_backend_dns_resolution(service_domain, target)
+        if not dns_check.get("success"):
+            return {
+                "triggered": False,
+                "reason": "DNS resolution check failed",
+                "dns_check": dns_check,
+            }
+
+        try:
+            from app.services.site_deployment_service import SiteDeploymentService
+
+            deployment = SiteDeploymentService().deploy_and_notify(
+                domain=service_domain,
+                doc_url=(request.request_data or {}).get("doc_url"),
+                operator_name=request.requester_name or "system",
+                applicant=getattr(request, "requester", None),
+                feishu_service=(
+                    get_feishu_service_for_user(self.db, request.requester)
+                    if getattr(request, "requester", None)
+                    else None
+                ),
+            )
+            return {
+                "triggered": True,
+                "success": bool(deployment.get("success")),
+                "dns_check": dns_check,
+                "result": deployment,
+            }
+        except Exception as exc:
+            logger.exception("后端接口服务域名解析成功后自动部署站点失败: request_id=%s", request.id)
+            return {
+                "triggered": True,
+                "success": False,
+                "dns_check": dns_check,
+                "error": str(exc),
+            }
 
     def _has_active_backend_dns_request(self, domain_name: str) -> bool:
         candidates = self.db.query(Request).filter(
@@ -666,11 +831,26 @@ class ExecutionService:
                 lines.append(f"**记录数**：成功 {result.get('success_count', 0)} / 共 {total}")
             for item in (result.get("records") or []):
                 rec = item.get("record", {})
-                flag = "✓" if item.get("status") == "success" else "✗"
+                flag = "✓" if item.get("status") in ("success", "skipped") else "✗"
                 line = f"  {flag} {rec.get('type','')} {rec.get('host','')} → {rec.get('value','')}"
                 if item.get("status") != "success" and item.get("message"):
                     line += f"（{item['message']}）"
                 lines.append(line)
+            site_deployment = result.get("site_deployment")
+            if site_deployment:
+                dns_check = site_deployment.get("dns_check") or {}
+                service_domain = dns_check.get("service_domain") or (
+                    (site_deployment.get("result") or {}).get("service_domain")
+                )
+                if site_deployment.get("triggered") and site_deployment.get("success"):
+                    deploy_status = "已完成"
+                elif site_deployment.get("triggered"):
+                    deploy_status = f"失败：{site_deployment.get('error') or '部署接口返回失败'}"
+                else:
+                    deploy_status = f"未触发：{site_deployment.get('reason') or 'DNS 检查未通过'}"
+                lines.append(f"**站点部署**：{deploy_status}")
+                if service_domain:
+                    lines.append(f"**站点域名**：{service_domain}")
             if not success and result.get("error"):
                 lines.append(f"**失败原因**：{result['error']}")
 
