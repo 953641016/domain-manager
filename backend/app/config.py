@@ -84,7 +84,7 @@ class Config:
     # --------------------------------------------------------------------------
     # Site deployment integration
     # --------------------------------------------------------------------------
-    SITE_DEPLOY_API_URL = os.getenv("SITE_DEPLOY_API_URL", "http://3.238.24.187/deploy-nginx-site")
+    SITE_DEPLOY_API_URL = os.getenv("SITE_DEPLOY_API_URL", "http://54.89.199.228/deploy-nginx-site")
     SITE_DEPLOY_API_TOKEN = os.getenv("SITE_DEPLOY_API_TOKEN", "")
     SITE_DEPLOY_TIMEOUT_SECONDS = int(os.getenv("SITE_DEPLOY_TIMEOUT_SECONDS", "900"))
     SITE_DEPLOY_POLL_INTERVAL_SECONDS = float(os.getenv("SITE_DEPLOY_POLL_INTERVAL_SECONDS", "3"))
