@@ -526,9 +526,10 @@ class SiteDeploymentService:
             timeout_seconds=timeout_seconds,
             poll_interval_seconds=poll_interval_seconds,
         )
-        post_result = None
-        if deploy_result.get("status") == "success":
-            post_result = self.call_post_deploy_api(post_payload)
+        post_result = {
+            "skipped": True,
+            "reason": "post-deploy API is temporarily disabled",
+        }
         return {
             "success": deploy_result.get("status") == "success",
             "service_domain": service_domain,

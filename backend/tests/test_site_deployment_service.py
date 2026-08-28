@@ -150,7 +150,7 @@ def test_resolve_service_domain_uses_jinan_profile_for_request_domain():
     assert resolution["backend_dns_target"] == "20.9.240.31"
 
 
-def test_deploy_and_notify_waits_then_calls_post_api(monkeypatch):
+def test_deploy_and_notify_waits_and_skips_post_api(monkeypatch):
     service = SiteDeploymentService(
         deploy_api_url="http://deploy.example.test/deploy-nginx-site",
         deploy_api_token="deploy-token",
@@ -186,6 +186,8 @@ def test_deploy_and_notify_waits_then_calls_post_api(monkeypatch):
     assert result["post_deploy_payload"]["api_url"] == "https://svc.example.com"
     assert result["post_deploy_payload"]["free_score"] is None
     assert result["post_deploy_payload"]["package_list"] == []
+    assert result["post_deploy_result"]["skipped"] is True
     assert calls[0][0] == "post"
     assert calls[1][0] == "get"
+    assert len(calls) == 2
     assert calls[2][0] == "post"
