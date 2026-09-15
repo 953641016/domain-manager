@@ -39,6 +39,7 @@
 - **操作日志筛选体验优化**（`frontend/src/pages/Logs.tsx`）：日志类型从下拉框改为“全部日志 / 用户操作 / 系统任务”选项卡，筛选控件收纳到独立卡片中；关键词、用户、日期、操作、资源筛选改为点击“搜索”后再请求，日期区间改为仿 Element DatePicker 的双月范围选择器，支持快捷范围、起止日期高亮和统一确认，避免输入时频繁刷新列表。
 
 ### 修复
+- **Vercel 裸 JSON 数组解析**（`backend/app/services/feishu_doc_parser.py`）：支持“Vercel Dns解析”章节内不带 `vercelDomainsRecords` 标记的 DNS 数组，并限制章节范围，避免将后续 Clerk 等记录归入 Vercel。
 - **DNS 账号自检拒绝空资源误判**（`backend/app/api/v1/domains.py`）：Cloudflare 自检必须读取到实际 Zone 并完成 DNS 记录读取，DNSPod 自检必须读取到实际域名；凭证有效但资源范围为空时明确判定失败，避免审批执行阶段才暴露无法获取 Zone ID。
 - **飞书文档按应用隔离凭证**（`backend/app/services/feishu_doc_parser.py`、`backend/app/api/v1/feishu.py`、`backend/app/services/site_deployment_service.py`）：文档读取、站点部署解析、Bitable 读取、审批卡片更新和机器人回复按申请人或回调所属飞书应用选择凭证，避免济南等非默认应用读取文档时出现 `forbidden`；通用发送接口和自动化表格请求支持显式传入 `feishu_app_id`。
 - **已注册域名重复购买拦截提示**（`backend/app/api/v1/feishu.py`）：域名购买审批时，若域名已存在于系统域名列表或服务商明确返回不可注册，申请会直接进入 `failed` 终态并回写原审批卡片为“已阻止执行”，不再保持待审批并提示“修正后重试”，避免测试已购域名时误以为仍可继续购买。

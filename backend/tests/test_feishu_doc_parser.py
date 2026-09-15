@@ -1,5 +1,68 @@
+import json
+
+import pytest
+
 from app.services.backend_dns_profile import BackendDnsProfile
 from app.services.feishu_doc_parser import FeishuDocParser
+
+
+@pytest.mark.parametrize("action", ["vercel_dns", "all_dns_except_gsc"])
+def test_parse_vercel_bare_json_array_and_adjacent_clerk(monkeypatch, action):
+    parser = FeishuDocParser()
+    target = "3a7e89250e271bb6.vercel-dns-016.com."
+    content = "\n".join([
+        "域名：yue2ai.app",
+        "Vercel Dns解析 ",
+        json.dumps([
+            {"host": "yue2ai.app", "name": "@", "type": "CNAME", "value": target},
+            {"host": "www.yue2ai.app", "name": "www", "type": "CNAME", "value": target},
+        ], indent=2),
+        "yue2ai.app 的 Clerk DNS 配置说明",
+        json.dumps([
+            {"host": "clerk.yue2ai.app", "type": "CNAME", "value": "frontend-api.clerk.services"},
+        ], indent=2),
+    ])
+    monkeypatch.setattr(parser, "get_document_title", lambda token: "yue2ai.app")
+    monkeypatch.setattr(parser, "get_raw_content", lambda token: content)
+
+    parsed = parser.parse("https://example.feishu.cn/docx/example", action)
+
+    assert parsed.raw_sections["vercel"] == [
+        {"hostname": host, "type": "CNAME", "target": target, "provider_section": "vercel", "ttl": 300}
+        for host in ["@", "www"]
+    ]
+    assert [record["hostname"] for record in parsed.raw_sections["clerk"]] == ["clerk"]
+    assert len(parsed.records) == (2 if action == "vercel_dns" else 3)
+
+
+@pytest.mark.parametrize("boundary", [
+    '"domainsRecords": [', "后端接口服务域名解析", "GSC网站认证解析",
+])
+def test_vercel_bare_json_fallback_does_not_read_other_sections(boundary):
+    parser = FeishuDocParser()
+    lines = [
+        "Vercel Dns解析",
+        "[]",
+        boundary,
+        '{"host": "other.example.com", "type": "CNAME", "value": "other.target.com"}',
+    ]
+
+    assert parser._parse_vercel(lines, "example.com") == []
+
+
+def test_parse_vercel_legacy_in_record():
+    parser = FeishuDocParser()
+
+    records = parser._parse_vercel([
+        "Vercel Dns解析", "www IN CNAME target.example.com.",
+        "example.com 的 Clerk DNS 配置说明",
+        "clerk IN CNAME frontend-api.clerk.services",
+    ], "example.com")
+
+    assert records == [{
+        "hostname": "www", "type": "CNAME", "target": "target.example.com.",
+        "provider_section": "vercel", "ttl": 300,
+    }]
 
 
 def test_parse_vercel_domains_records_json_block():

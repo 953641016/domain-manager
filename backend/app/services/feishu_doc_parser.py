@@ -408,14 +408,19 @@ class FeishuDocParser:
         if records:
             return records
 
-        section = self._section_lines(lines, "Vercel Dns解析", ["Clerk DNS", "Clerk域名解析"])
-        records = []
+        section = self._section_lines(
+            lines,
+            "Vercel Dns解析",
+            ["Clerk DNS", "Clerk域名解析", "domainsRecords", "后端接口", "GSC", "四、", "接口域名解析"],
+        )
+        # 新版文档直接在 Vercel 标题下放 JSON 数组，不再包含字段标记。
+        records = self._parse_json_like_records(section, domain, "vercel")
         for line in section:
             match = re.match(r"^(\S+)\s+IN\s+(\S+)\s+(.+)$", line, flags=re.I)
             if match:
                 record = self._record(match.group(1), match.group(2), match.group(3), "vercel")
                 if record:
-                    records.append(record)
+                    self._append_record_once(records, record)
         return records
 
     def _parse_clerk(self, lines: List[str], domain: str) -> List[Dict[str, Any]]:
