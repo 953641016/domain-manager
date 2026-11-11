@@ -103,6 +103,8 @@ app.add_middleware(
 
 # 注册路由
 from app.api.v1 import auth, users, confirmations, feishu, domains, dns, requests, registrar, audit, ssl, config, site_deployments
+from app.api.v1 import www_redirects
+app.include_router(www_redirects.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1", tags=["认证"])
 app.include_router(users.router, prefix="/api/v1", tags=["用户"])
 app.include_router(confirmations.router, prefix="/api/v1", tags=["用户确认"])

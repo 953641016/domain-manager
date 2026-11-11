@@ -536,6 +536,105 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
         super().__init__(api_key)
         self.base_url = "https://api.cloudflare.com/client/v4"
 
+    def _redirect_api(self, method, path, **kwargs):
+        data = self._request_json(method, f"{self.base_url}{path}", **kwargs)
+        if not data.get("success"):
+            raise ValueError(self._format_cloudflare_errors(data.get("errors")))
+        return data
+
+    def find_redirect_zone(self, domain):
+        data = self._redirect_api("GET", "/zones", params={"name": domain})
+        zones = [z for z in data.get("result", []) if z.get("name") == domain]
+        if not zones:
+            return None
+        if len(zones) != 1 or zones[0].get("status") != "active" or zones[0].get("paused"):
+            raise ValueError("域名 Zone 未激活、已暂停或不唯一")
+        return zones[0]
+
+    def _www_dns_records(self, base, host):
+        records, page = [], 1
+        while True:
+            data = self._redirect_api("GET", f"{base}/dns_records", params={"name": host, "page": page, "per_page": 100})
+            records.extend(r for r in data.get("result", []) if r.get("name") == host)
+            if page >= (data.get("result_info", {}).get("total_pages") or 1):
+                return records
+            page += 1
+
+    def configure_www_redirect(self, domain, zone_id):
+        """专用按钮：逐条更新规则，不覆盖其他规则；API 读回不等于公网验收。"""
+        base = f"/zones/{zone_id}"
+        host = f"www.{domain}"
+        ref = self._redirect_ref(301, host)
+        rule = {
+            "ref": ref, "enabled": True,
+            "description": f"Domain Manager: {host} 301 to {domain}",
+            "expression": f'(http.host eq "{host}")',
+            "action": "redirect",
+            "action_parameters": {"from_value": {
+                "target_url": {"expression": f'concat("https://{domain}", http.request.uri.path)'},
+                "status_code": 301, "preserve_query_string": True,
+            }},
+        }
+        stage = "preflight"
+        try:
+            dns = self._www_dns_records(base, host)
+            address_records = [r for r in dns if r.get("type") in ("A", "AAAA", "CNAME")]
+            if any(r.get("type") == "NS" for r in dns):
+                raise ValueError("www 存在 NS 委派，请先处理冲突")
+            if any(not r.get("proxiable", False) for r in address_records):
+                raise ValueError("www 存在不支持代理的解析记录")
+            rulesets = self._redirect_api("GET", f"{base}/rulesets").get("result", [])
+            entries = [r for r in rulesets if r.get("kind") == "zone" and r.get("phase") == "http_request_dynamic_redirect"]
+            if len(entries) > 1:
+                raise ValueError("重定向入口规则集不唯一")
+            stage = "rule_write"
+            if entries:
+                ruleset_id = entries[0]["id"]
+                ruleset_path = f"{base}/rulesets/{ruleset_id}"
+                existing = self._redirect_api("GET", ruleset_path)["result"]
+                matches = [r for r in existing.get("rules", []) if r.get("ref") == ref]
+                if len(matches) > 1:
+                    raise ValueError("已有多个同标识规则，请先处理冲突")
+                payload = {**rule, "position": {"index": 1}}
+                if matches:
+                    self._redirect_api("PATCH", f"{ruleset_path}/rules/{matches[0]['id']}", json=payload)
+                else:
+                    self._redirect_api("POST", f"{ruleset_path}/rules", json=payload)
+            else:
+                created = self._redirect_api("POST", f"{base}/rulesets", json={
+                    "name": "Domain Manager Redirect Rules", "kind": "zone",
+                    "phase": "http_request_dynamic_redirect", "rules": [rule],
+                })["result"]
+                ruleset_path = f"{base}/rulesets/{created['id']}"
+            # 先写规则再打开代理；失败时报告可能存在的部分配置，重试复用 ref。
+            stage = "dns_write"
+            if not address_records:
+                self._redirect_api("POST", f"{base}/dns_records", json={
+                    "type": "A", "name": host, "content": "192.0.2.1", "proxied": True, "ttl": 1,
+                })
+            else:
+                for record in address_records:
+                    if not record.get("proxied"):
+                        self._redirect_api("PATCH", f"{base}/dns_records/{record['id']}", json={"proxied": True, "ttl": 1})
+            stage = "readback"
+            read_rules = self._redirect_api("GET", ruleset_path)["result"].get("rules", [])
+            matching = [r for r in read_rules if r.get("ref") == ref]
+            if len(matching) != 1 or any(matching[0].get(k) != rule[k] for k in ("enabled", "expression", "action", "action_parameters")):
+                raise ValueError("重定向规则读回不一致")
+            read_dns = [r for r in self._www_dns_records(base, host) if r.get("type") in ("A", "AAAA", "CNAME")]
+            if not read_dns or not all(r.get("proxied") for r in read_dns):
+                raise ValueError("www 代理解析读回不一致")
+            return {
+                "status": "configured", "source_host": host, "target_url": f"https://{domain}",
+                "status_code": 301, "preserve_path": True, "preserve_query_string": True,
+                "rule_id": matching[0]["id"], "zone_id": zone_id,
+                "is_config_verified": True, "is_live_verified": False,
+                "message": "规则和代理解析已配置并读回；公网跳转及证书尚未验证",
+            }
+        except (ValueError, KeyError, TypeError) as exc:
+            suffix = "未执行远程写入" if stage == "preflight" else "可能已部分写入，可用相同参数重试；请勿视为成功"
+            raise ValueError(f"{stage}: {exc}；{suffix}") from exc
+
     def _get_headers(self) -> Dict[str, str]:
         """获取请求头"""
         return {
