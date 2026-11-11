@@ -8,6 +8,12 @@
 
 ## [未发布]
 
+### 修复
+- **飞书审批卡片测试兼容性**：模拟后台确认函数补齐飞书应用 ID 参数并覆盖默认/指定应用；终态失败测试使用真实 ORM 模型与临时 SQLite 数据库，跨会话读回确认失败状态持久化，并验证卡片更新与通知调用。未修改生产审批逻辑；全量测试 136 项通过。
+
+### 变更
+- **www 301 接口方向反转**：保持接口与参数不变，将裸域名 301 到 HTTPS www，保留路径和参数；沿用稳定 ref 原地更新该接口创建的旧反向规则，代理解析作用于裸域名。写入前检查 www 目标解析，拒绝缺失/旧占位目标和直接 CNAME 循环，保留原有 Token 与归属校验。
+
 ### 新增
 - **飞书按钮 www 301 接口**（`POST /api/v1/www-redirects`）：域名优先、飞书文档兜底，沿用旧按钮接口的可选 `verification_token` 校验及 `applicant_feishu_id` 参数（支持 JSON/查询参数），不增加环境配置；校验执行人角色和域名/账号归属。通过 Cloudflare 配置 HTTP/HTTPS 到 HTTPS 裸域名的 301、保留路径与参数、补齐 www 代理解析，重复请求复用规则并读回校验。返回 `configured` 不代表公网/证书验收完成；配置说明见 `docs/www-redirect-api.md`。无数据库结构变更。
 - **后端解析成功后自动站点部署**（`backend/app/services/execution_service.py`）：DNS 执行流程识别 `backend_dns`、旧版 `api_domain` 和 `provider_section=backend` 的后端 A 记录；记录成功或已存在一致后等待公网解析到目标 IP，再内部调用站点部署逻辑，并在飞书执行结果卡片展示站点部署状态。

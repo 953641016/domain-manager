@@ -1,7 +1,7 @@
-# 飞书多维表格按钮：www 自动 301 到裸域名
+# 飞书多维表格按钮：裸域名自动 301 到 www
 
 后端内部接口：`POST /api/v1/www-redirects`，JSON 请求/响应。
-线上按钮地址：`https://d.fwxg.com/dm/api/www-redirects`，已部署并验证路由和参数校验。
+按钮地址保持 `https://d.fwxg.com/dm/api/www-redirects`。本次版本改为裸域名 → www；下方原方向部署验收属于历史记录。
 
 ## 飞书按钮请求
 
@@ -34,7 +34,7 @@ Body 中使用自动化编辑器插入当前记录的字段变量：
 3. 文档优先使用 `域名：example.com` / `主域名：example.com`、现有域名章节，缺失时使用标题。发现多个候选则返回 400，要求填写明确的 `domain`。
 4. 如果有效的 `domain` 不在授权账号中或不是有效 Zone，则报错；不会悄悄改用文档中的另一个域名。
 
-示例目标：`http://www.example.com/a?q=1` 和 `https://www.example.com/a?q=1` → `https://example.com/a?q=1`，状态码 301。
+示例目标：`http://example.com/a?q=1` 和 `https://example.com/a?q=1` → `https://www.example.com/a?q=1`，状态码 301。
 
 ## 部署配置与权限
 
@@ -54,15 +54,15 @@ Token 校验是兼容旧接口的可选校验，申请人存在性检查不构�
 已有本地 DNS 账号绑定时只用绑定账号；否则扫描可见的启用 Cloudflare 账号。多个账号命中返回 409，需在域名管理中绑定唯一账号。
 
 Cloudflare Token 需包含目标 Zone、Zone 读取、DNS 读取/编辑、Single Redirect（Dynamic URL Redirects）编辑权限。
-域名 Zone 必须 active；不会自动更换 NS 或注册域名。裸域名网站和 HTTPS 证书需要原本可用。
+域名 Zone 必须 active；不会自动更换 NS 或注册域名。www 网站及 HTTPS 证书需可用，裸域名的 HTTPS 入口证书也须有效。
 
 ## 写入与结果
 
-使用 Single Redirect Rulesets API，条件精确匹配 `www.<domain>`，目标由固定 HTTPS 裸域名及原请求 path 组成，并启用保留查询字符串。
-规则放到当前 Single Redirect 入口的第一位，仅 PATCH 同一 `ref` 的规则或新增一条；保留其他规则。相同标识的旧 HTTPS-only 规则会更新为同时覆盖 HTTP/HTTPS。
+使用 Single Redirect Rulesets API，条件精确匹配裸域名 `<domain>`，目标由固定 `https://www.<domain>` 及原请求 path 组成，并启用保留查询字符串。
+规则放到当前 Single Redirect 入口的第一位，仅 PATCH 同一 `ref` 的规则或新增一条；保留其他规则。沿用旧版 www 规则的稳定 ref，将该接口此前创建的反向规则原地改为裸域名 → www，避免新增双向规则。其他手工/外部系统规则保持原样，需检查是否存在反向跳转。
 
-www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方重定向占位地址）；已有记录保留原目标并开启代理、TTL 改为自动。
-存在 NS 委派或无法代理的地址记录则阻止执行。不会修改裸域名记录。
+裸域名没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`；已有记录保留原目标并开启代理、TTL 改为自动。无法代理的地址记录会阻止执行。
+www 必须已有真实网站解析，接口不会修改 www 记录；若缺少解析或仍指向旧跳转占位地址 `192.0.2.1` / `100::`，会在写入前报错。www 若通过 CNAME 指向裸域名，则裸域名必须已有真实源站解析，不能用占位地址，也不能反向 CNAME 回 www。
 
 成功 HTTP 200 示例：
 
@@ -72,8 +72,8 @@ www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方
   "domain": "example.com",
   "domain_source": "domain",
   "dns_account_id": 1,
-  "source_host": "www.example.com",
-  "target_url": "https://example.com",
+  "source_host": "example.com",
+  "target_url": "https://www.example.com",
   "status_code": 301,
   "preserve_path": true,
   "preserve_query_string": true,
@@ -86,7 +86,7 @@ www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方
 ```
 
 `configured` 表示 Cloudflare 规则和代理解析已读回匹配；不表示 DNS 传播、www 证书签发或网站跳转已完成验收。接口不会对输入域名主动发公网请求。
-上线后分别检查 HTTP/HTTPS、根路径/子路径/查询参数，以及裸域名没有反跳 www，防止循环。
+上线后分别检查 HTTP/HTTPS、根路径/子路径/查询参数，以及 www 没有反跳裸域名，防止循环。
 
 错误返回 `{"detail":"原因"}`。权限/读取错误不会被当成“没有规则”；远程写入之后发生失败返回 502，并标注可能已部分写入和失败阶段。
 相同域名重试会更新同一标识的规则。请求超时先检查审计及 Cloudflare 状态，不要把超时认定为完全未执行。并发首次创建可能被 Cloudflare 拒绝，失败请求可串行重试；建议自动化避免同域名同时执行。
@@ -99,14 +99,14 @@ www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方
 - [逐条新增规则和 position](https://developers.cloudflare.com/ruleset-engine/rulesets-api/add-rule/)
 - [www 重定向与代理占位解析](https://developers.cloudflare.com/pages/how-to/www-redirect/)
 
-## 本地验证记录（2026-11-11）
+## 原方向本地验证记录（2026-11-11，历史）
 
 - 新接口 43 项测试通过，覆盖旧接口 Token 兼容矩阵（JSON/查询参数）、申请人角色/归属边界、参数优先级、文档歧义、幂等更新、代理解析、部分失败重试、读回不一致和审计。
 - 全量测试：127 通过、2 失败。失败项为 `test_feishu_card_update.py` 的 `test_account_card_action_returns_before_database_validation`（mock 参数数量未跟随调用更新）和 `test_terminal_doc_action_failure_marks_request_failed`（对 SimpleNamespace 调用 SQLAlchemy object_session）。两项均已在独立临时目录的未修改 HEAD 上复现。
 - 主应用 OpenAPI 已包含 POST `/api/v1/www-redirects`，复用 `verification_token` 参数，没有专用 Token 请求头；`git diff --check` 通过。
 - Cloudflare/飞书写入使用模拟响应测试，未对业务域名添加测试规则；实际表格按钮尚待按上述配置填写。
 
-## 线上部署验收（2026-11-11）
+## 原方向线上部署验收（2026-11-11，历史）
 
 - 后端代码提交：`bc69631087aab4e78e04aac7b10ef5dc86f468ad`，已推送 GitHub main，使用 `bash deploy.sh backend` 部署至 `47.79.243.31:/opt/domain-manager`。
 - 后端容器 `healthy`，重启计数 0，`/health` 返回 `{"status":"ok"}`；线上容器运行新增测试 43 项全部通过。
@@ -114,3 +114,14 @@ www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方
 - 使用真实启用专员但不提供域名/文档进行无写入校验：返回 400，说明申请人校验通过且输入保护生效。
 - 当前线上 `FEISHU_VERIFICATION_TOKEN` 未配置，因此 `verification_token` 可省略，与旧按钮接口保持一致；未修改线上环境变量。
 - 已保留旧镜像标签 `domain-manager-backend:rollback-before-www-bc69631`。未进行真实 Cloudflare 规则创建或公网 301 效果验收。
+
+## 本次方向反转（2026-11-11）
+
+- 请求地址、参数及 Token 兼容逻辑保持不变，裸域名通过 301 跳转至 HTTPS www，并保留路径和查询参数。
+- 49 项接口测试通过，包括旧反向规则原地迁移、目标占位解析拦截及 www CNAME 到真实裸域名源站的场景。
+- 部署后需对目标域名再次触发接口，才会更新该域名的服务商规则；部署不会批量更改已有规则。
+
+## 既有审批测试修复（2026-11-11，本地）
+
+- 两项既有失败已修复：同步后台函数模拟签名，使用真实 ORM 模型及独立临时 SQLite 验证失败终态持久化。
+- 全量测试：136 通过、0 失败（9 条依赖弃用警告）。未修改生产审批代码。

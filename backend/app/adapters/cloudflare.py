@@ -563,15 +563,17 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
     def configure_www_redirect(self, domain, zone_id):
         """专用按钮：逐条更新规则，不覆盖其他规则；API 读回不等于公网验收。"""
         base = f"/zones/{zone_id}"
-        host = f"www.{domain}"
-        ref = self._redirect_ref(301, host)
+        host = domain
+        target_host = f"www.{domain}"
+        # 保留旧版本的稳定 ref：原地反转旧规则，避免同时存在双向 301。
+        ref = self._redirect_ref(301, target_host)
         rule = {
             "ref": ref, "enabled": True,
-            "description": f"Domain Manager: {host} 301 to {domain}",
+            "description": f"Domain Manager: {host} 301 to {target_host}",
             "expression": f'(http.host eq "{host}")',
             "action": "redirect",
             "action_parameters": {"from_value": {
-                "target_url": {"expression": f'concat("https://{domain}", http.request.uri.path)'},
+                "target_url": {"expression": f'concat("https://{target_host}", http.request.uri.path)'},
                 "status_code": 301, "preserve_query_string": True,
             }},
         }
@@ -579,10 +581,19 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
         try:
             dns = self._www_dns_records(base, host)
             address_records = [r for r in dns if r.get("type") in ("A", "AAAA", "CNAME")]
-            if any(r.get("type") == "NS" for r in dns):
-                raise ValueError("www 存在 NS 委派，请先处理冲突")
             if any(not r.get("proxiable", False) for r in address_records):
-                raise ValueError("www 存在不支持代理的解析记录")
+                raise ValueError("裸域名存在不支持代理的解析记录")
+            target_records = [r for r in self._www_dns_records(base, target_host) if r.get("type") in ("A", "AAAA", "CNAME")]
+            # 老版本可能为 www 创建了仅用于跳转的占位 IP，不能把它当作网站源站。
+            placeholders = {"192.0.2.1", "100::"}
+            if not target_records or any(r.get("content") in placeholders for r in target_records):
+                raise ValueError("请先为 www 配置真实网站解析；缺少解析或仍使用旧跳转占位地址")
+            points_to_apex = any(r.get("type") == "CNAME" and str(r.get("content", "")).lower().rstrip(".") == domain for r in target_records)
+            if points_to_apex and (not address_records or any(
+                r.get("content") in placeholders or str(r.get("content", "")).lower().rstrip(".") == target_host
+                for r in address_records
+            )):
+                raise ValueError("www 指向裸域名，但裸域名缺少真实源站解析或存在 CNAME 循环")
             rulesets = self._redirect_api("GET", f"{base}/rulesets").get("result", [])
             entries = [r for r in rulesets if r.get("kind") == "zone" and r.get("phase") == "http_request_dynamic_redirect"]
             if len(entries) > 1:
@@ -623,9 +634,9 @@ class CloudflareDnsProviderAdapter(BaseDnsProviderAdapter):
                 raise ValueError("重定向规则读回不一致")
             read_dns = [r for r in self._www_dns_records(base, host) if r.get("type") in ("A", "AAAA", "CNAME")]
             if not read_dns or not all(r.get("proxied") for r in read_dns):
-                raise ValueError("www 代理解析读回不一致")
+                raise ValueError("裸域名代理解析读回不一致")
             return {
-                "status": "configured", "source_host": host, "target_url": f"https://{domain}",
+                "status": "configured", "source_host": host, "target_url": f"https://{target_host}",
                 "status_code": 301, "preserve_path": True, "preserve_query_string": True,
                 "rule_id": matching[0]["id"], "zone_id": zone_id,
                 "is_config_verified": True, "is_live_verified": False,

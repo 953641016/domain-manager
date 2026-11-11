@@ -154,7 +154,7 @@ def test_accounts_scoped_and_secrets_not_rewritten(db, monkeypatch):
 class FakeCloudflare:
     def __init__(self):
         self.rules = []
-        self.dns = []
+        self.dns = [{"id": "target", "name": "www.example.com", "type": "CNAME", "content": "site.example.net", "proxiable": True, "proxied": False}]
         self.exists = False
         self.writes = []
         self.fail = None
@@ -208,10 +208,10 @@ def test_configure_and_repeat_are_idempotent(monkeypatch):
     second = adapter.configure_www_redirect("example.com", "zone")
     assert first == second
     assert first["status"] == "configured" and first["is_live_verified"] is False
-    assert len(fake.rules) == len(fake.dns) == 1
-    assert fake.rules[0]["expression"] == '(http.host eq "www.example.com")'
+    assert len(fake.rules) == 1 and len(fake.dns) == 2
+    assert fake.rules[0]["expression"] == '(http.host eq "example.com")'
     params = fake.rules[0]["action_parameters"]["from_value"]
-    assert params["target_url"]["expression"] == 'concat("https://example.com", http.request.uri.path)'
+    assert params["target_url"]["expression"] == 'concat("https://www.example.com", http.request.uri.path)'
     assert params["status_code"] == 301 and params["preserve_query_string"] is True
 
 
@@ -220,10 +220,10 @@ def test_existing_records_and_unrelated_rules_preserved(monkeypatch):
     fake.exists = True
     unrelated = {"id": "other", "ref": "other", "action": "redirect"}
     fake.rules = [deepcopy(unrelated)]
-    fake.dns = [{"id": "dns1", "name": "www.example.com", "type": "CNAME", "content": "existing.example.net", "proxiable": True, "proxied": False}]
+    fake.dns.append({"id": "dns1", "name": "example.com", "type": "CNAME", "content": "existing.example.net", "proxiable": True, "proxied": False})
     adapter.configure_www_redirect("example.com", "zone")
     assert fake.rules[1] == unrelated
-    assert fake.dns[0]["content"] == "existing.example.net" and fake.dns[0]["proxied"]
+    assert fake.dns[1]["content"] == "existing.example.net" and fake.dns[1]["proxied"]
     assert all(method != "PUT" for method, _ in fake.writes)
 
 
@@ -240,10 +240,10 @@ def test_partial_failure_can_be_retried(monkeypatch):
     fake.fail = lambda method, path: path == "/dns_records" and method == "POST"
     with pytest.raises(ValueError, match="可能已部分写入"):
         adapter.configure_www_redirect("example.com", "zone")
-    assert len(fake.rules) == 1 and not fake.dns
+    assert len(fake.rules) == 1 and len(fake.dns) == 1
     fake.fail = None
     adapter.configure_www_redirect("example.com", "zone")
-    assert len(fake.rules) == len(fake.dns) == 1
+    assert len(fake.rules) == 1 and len(fake.dns) == 2
 
 
 def test_http_endpoint_result_and_audit(client, db, monkeypatch):
@@ -279,10 +279,10 @@ def test_readback_failure_is_not_success(monkeypatch):
         adapter.configure_www_redirect("example.com", "zone")
 
 
-def test_ns_delegation_blocks_writes(monkeypatch):
+def test_nonproxiable_apex_blocks_writes(monkeypatch):
     adapter, fake = adapter_with_fake(monkeypatch)
-    fake.dns = [{"id": "ns1", "name": "www.example.com", "type": "NS"}]
-    with pytest.raises(ValueError, match="NS 委派"):
+    fake.dns.append({"id": "apex", "name": "example.com", "type": "A", "proxiable": False})
+    with pytest.raises(ValueError, match="不支持代理"):
         adapter.configure_www_redirect("example.com", "zone")
     assert not fake.writes
 
@@ -295,3 +295,38 @@ def test_ambiguous_accounts_require_binding(db, monkeypatch):
     with pytest.raises(HTTPException) as exc:
         svc.WwwRedirectService(db).select_adapter(db.get(User, 1), "example.com")
     assert exc.value.status_code == 409
+
+
+def test_old_reverse_rule_is_replaced_in_place(monkeypatch):
+    adapter, fake = adapter_with_fake(monkeypatch)
+    fake.exists = True
+    fake.rules = [{"id": "old-rule", "ref": adapter._redirect_ref(301, "www.example.com"),
+                   "expression": '(http.host eq "www.example.com")', "action": "redirect"}]
+    target_before = deepcopy(fake.dns[0])
+    result = adapter.configure_www_redirect("example.com", "zone")
+    assert result["source_host"] == "example.com"
+    assert result["target_url"] == "https://www.example.com"
+    assert result["rule_id"] == "old-rule" and len(fake.rules) == 1
+    assert fake.rules[0]["expression"] == '(http.host eq "example.com")'
+    assert fake.dns[0] == target_before
+
+
+@pytest.mark.parametrize("target", [None, "192.0.2.1", "100::", "example.com"])
+def test_missing_or_placeholder_target_blocks_writes(monkeypatch, target):
+    adapter, fake = adapter_with_fake(monkeypatch)
+    if target is None:
+        fake.dns = []
+    else:
+        fake.dns[0]["content"] = target
+    with pytest.raises(ValueError, match="未执行远程写入"):
+        adapter.configure_www_redirect("example.com", "zone")
+    assert not fake.writes
+
+
+def test_www_alias_to_existing_apex_is_supported(monkeypatch):
+    adapter, fake = adapter_with_fake(monkeypatch)
+    fake.dns[0]["content"] = "example.com"
+    fake.dns.append({"id": "origin", "name": "example.com", "type": "A", "content": "203.0.113.10", "proxiable": True, "proxied": False})
+    adapter.configure_www_redirect("example.com", "zone")
+    assert fake.dns[1]["content"] == "203.0.113.10"
+    assert fake.dns[1]["proxied"] is True

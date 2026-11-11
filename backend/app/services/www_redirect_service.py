@@ -1,4 +1,4 @@
-"""专用 www -> apex 配置流程；输入 URL 仅解析，绝不向用户指定地址发请求。"""
+"""专用 apex -> www 配置流程；输入 URL 仅解析，绝不向用户指定地址发请求。"""
 import ipaddress
 import re
 from urllib.parse import urlsplit

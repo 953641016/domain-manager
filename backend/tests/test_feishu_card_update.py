@@ -4,6 +4,13 @@ import hashlib
 from datetime import datetime
 from types import SimpleNamespace
 
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
+
+from app.core.database import Base
+from app.models.request import Request
+from app.models.user import User
 from app.services.feishu_service import FeishuService
 from app.services.execution_service import ExecutionService
 from app.services.user_confirmation_service import UserOperationConfirmationService
@@ -192,14 +199,16 @@ def test_request_card_status_handles_pending_partial_and_failed():
     assert ExecutionService._request_card_status(request, {}, False) == "执行失败"
 
 
-def test_account_card_action_returns_before_database_validation(monkeypatch):
+@pytest.mark.parametrize("feishu_app_id", [None, 7])
+def test_account_card_action_returns_before_database_validation(monkeypatch, feishu_app_id):
     captured = {}
 
-    def fake_background(confirmation_id, card_action, approver_feishu_userid, reject_reason=""):
+    def fake_background(confirmation_id, card_action, approver_feishu_userid, feishu_app_id=None, reject_reason=""):
         captured.update({
             "confirmation_id": confirmation_id,
             "card_action": card_action,
             "approver_feishu_userid": approver_feishu_userid,
+            "feishu_app_id": feishu_app_id,
             "reject_reason": reject_reason,
         })
 
@@ -209,7 +218,7 @@ def test_account_card_action_returns_before_database_validation(monkeypatch):
         "action": {
             "value": {"action": "approve_account_op", "confirmation_id": "123"},
         },
-        "operator": {"open_id": "ou_approver"},
+        "operator": {"open_id": "ou_approver", "feishu_app_id": feishu_app_id},
     }))
 
     assert result["toast"]["type"] == "success"
@@ -217,6 +226,7 @@ def test_account_card_action_returns_before_database_validation(monkeypatch):
         "confirmation_id": 123,
         "card_action": "approve_account_op",
         "approver_feishu_userid": "ou_approver",
+        "feishu_app_id": feishu_app_id,
         "reject_reason": "未填写",
     }
 
@@ -269,31 +279,38 @@ def test_card_action_handles_legacy_root_action_and_json_value(monkeypatch):
     assert captured["args"][3]["open_id"] == "ou_reviewer"
 
 
-def test_terminal_doc_action_failure_marks_request_failed(monkeypatch):
-    monkeypatch.setattr("app.api.v1.feishu._update_request_approval_card_failed", lambda *args, **kwargs: None)
-    monkeypatch.setattr("app.api.v1.feishu._notify_doc_request_terminal_failed", lambda *args, **kwargs: None)
-    req = SimpleNamespace(
-        id="req-duplicate",
-        type="domain_register",
-        status="pending",
-        domain_name="example.com",
-        requester_name="申请人",
-        error_message=None,
-        approver_id=None,
-        approver_name=None,
-        approved_at=None,
-    )
-    applicant = SimpleNamespace(id=1, name="申请人")
-    reviewer = SimpleNamespace(id=2, name="审批人")
+def test_terminal_doc_action_failure_marks_request_failed(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr("app.api.v1.feishu._update_request_approval_card_failed",
+                        lambda req, *args: calls.append(("card", req.id, req.status)))
+    monkeypatch.setattr("app.api.v1.feishu._notify_doc_request_terminal_failed",
+                        lambda req, *args: calls.append(("notify", req.id, req.status)))
+    engine = create_engine(f"sqlite:///{(tmp_path / 'approval.db').as_posix()}")
+    try:
+        Base.metadata.create_all(engine)
+        with Session(engine) as db:
+            applicant = User(id=1, name="申请人", role="business")
+            reviewer = User(id=2, name="审批人", role="domain_spec")
+            req = Request(
+                id="req-duplicate", type="domain_register", status="pending",
+                domain_name="example.com", requester_id=1, requester_name="申请人",
+            )
+            db.add_all([applicant, reviewer, req])
+            db.commit()
+            result = _finalize_doc_request_action_failed(req, applicant, reviewer, "已阻止重复购买")
+            assert result["toast"]["type"] == "error"
 
-    result = _finalize_doc_request_action_failed(req, applicant, reviewer, "已阻止重复购买")
-
-    assert result["toast"]["type"] == "error"
-    assert req.status == "failed"
-    assert req.error_message == "已阻止重复购买"
-    assert req.approver_id == 2
-    assert req.approver_name == "审批人"
-    assert req.approved_at is not None
+        # 关闭原会话后重新查询，确认失败终态确实提交，而非只修改内存对象。
+        with Session(engine) as db:
+            saved = db.get(Request, "req-duplicate")
+            assert saved.status == "failed"
+            assert saved.error_message == "已阻止重复购买"
+            assert saved.approver_id == 2
+            assert saved.approver_name == "审批人"
+            assert saved.approved_at is not None
+        assert calls == [("card", "req-duplicate", "failed"), ("notify", "req-duplicate", "failed")]
+    finally:
+        engine.dispose()
 
 
 def test_domain_register_account_falls_back_to_request_default():
