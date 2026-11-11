@@ -1,14 +1,15 @@
 # 飞书多维表格按钮：www 自动 301 到裸域名
 
-接口：`POST /api/v1/www-redirects`，JSON 请求/响应。本地代码已实现，部署和线上验收另行执行。
+后端内部接口：`POST /api/v1/www-redirects`，JSON 请求/响应。
+线上按钮地址：`https://d.fwxg.com/dm/api/www-redirects`，已部署并验证路由和参数校验。
 
 ## 飞书按钮请求
 
 在按钮触发的自动化中配置“发送 HTTP 请求”（不要使用只打开网页的按钮）。
 
 - 方法：`POST`
-- URL：`https://<域名管家地址>/<可选部署前缀>/api/v1/www-redirects`
-- 若沿用 `/dm` 子路径部署，路径是 `/dm/api/v1/www-redirects`。
+- URL：`https://d.fwxg.com/dm/api/www-redirects`
+- 当前 Nginx 把 `/dm/api/<路径>` 重写为 `/api/v1/<路径>`，公网地址不要再加 `/v1`。
 - Header：`Content-Type: application/json`
 
 Body 中使用自动化编辑器插入当前记录的字段变量：
@@ -103,4 +104,13 @@ www 没有 A/AAAA/CNAME 时创建代理 A 记录 `192.0.2.1`（Cloudflare 官方
 - 新接口 43 项测试通过，覆盖旧接口 Token 兼容矩阵（JSON/查询参数）、申请人角色/归属边界、参数优先级、文档歧义、幂等更新、代理解析、部分失败重试、读回不一致和审计。
 - 全量测试：127 通过、2 失败。失败项为 `test_feishu_card_update.py` 的 `test_account_card_action_returns_before_database_validation`（mock 参数数量未跟随调用更新）和 `test_terminal_doc_action_failure_marks_request_failed`（对 SimpleNamespace 调用 SQLAlchemy object_session）。两项均已在独立临时目录的未修改 HEAD 上复现。
 - 主应用 OpenAPI 已包含 POST `/api/v1/www-redirects`，复用 `verification_token` 参数，没有专用 Token 请求头；`git diff --check` 通过。
-- Cloudflare/飞书调用使用模拟响应测试；未调用真实账号写入，未配置实际表格按钮，未部署、未进行公网验收。
+- Cloudflare/飞书写入使用模拟响应测试，未对业务域名添加测试规则；实际表格按钮尚待按上述配置填写。
+
+## 线上部署验收（2026-11-11）
+
+- 后端代码提交：`bc69631087aab4e78e04aac7b10ef5dc86f468ad`，已推送 GitHub main，使用 `bash deploy.sh backend` 部署至 `47.79.243.31:/opt/domain-manager`。
+- 后端容器 `healthy`，重启计数 0，`/health` 返回 `{"status":"ok"}`；线上容器运行新增测试 43 项全部通过。
+- 公网 `POST https://d.fwxg.com/dm/api/www-redirects`：缺少申请人返回 422；不存在的申请人返回 403，均命中新增路由。
+- 使用真实启用专员但不提供域名/文档进行无写入校验：返回 400，说明申请人校验通过且输入保护生效。
+- 当前线上 `FEISHU_VERIFICATION_TOKEN` 未配置，因此 `verification_token` 可省略，与旧按钮接口保持一致；未修改线上环境变量。
+- 已保留旧镜像标签 `domain-manager-backend:rollback-before-www-bc69631`。未进行真实 Cloudflare 规则创建或公网 301 效果验收。
